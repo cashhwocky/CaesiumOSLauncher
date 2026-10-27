@@ -1,18 +1,18 @@
-name: Build Custom Launcher APK
+name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: 'zulu'
@@ -21,305 +21,31 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.19.x'
           channel: 'stable'
+          cache: true
 
-      - name: Generate Android Launcher Project & 120Hz Native Bridge
+      - name: Generate Scaffold & Build APK
         run: |
-          flutter create --org com.alexdesrosier --project-name pixel_launcher --platforms android build_app
+          mkdir -p /tmp/backup/lib
+          cp lib/main.dart /tmp/backup/lib/
+          cp pubspec.yaml /tmp/backup/
 
-          cat > build_app/pubspec.yaml << 'EOF'
-          name: pixel_launcher
-          description: Custom 120Hz Material You & Liquid Glass Launcher by Alex Desrosier.
-          publish_to: 'none'
-          version: 1.1.0+2
+          rm -rf lib android ios web linux macos windows pubspec.yaml .metadata
 
-          environment:
-            sdk: '>=3.4.0 <4.0.0'
+          flutter create . --org com.example --project-name caesium_launcher --platforms=android
 
-          dependencies:
-            flutter:
-              sdk: flutter
-            cupertino_icons: ^1.0.8
-            shared_preferences: ^2.3.2
-            dynamic_color: ^1.7.0
+          cp /tmp/backup/lib/main.dart lib/
+          cp /tmp/backup/pubspec.yaml pubspec.yaml
 
-          flutter:
-            uses-material-design: true
-          EOF
+      - name: Install dependencies
+        run: flutter pub get
 
-          cp custom/main.dart build_app/lib/main.dart
+      - name: Build APK
+        run: flutter build apk --release
 
-          # 1. Write AndroidManifest.xml with hardware acceleration & HOME intent
-          cat > build_app/android/app/src/main/AndroidManifest.xml << 'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-              <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
-              <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
-              <uses-permission android:name="android.permission.SET_WALLPAPER" />
-
-              <application
-                  android:label="Pixel Launcher"
-                  android:name="${applicationName}"
-                  android:hardwareAccelerated="true"
-                  android:icon="@mipmap/ic_launcher">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTask"
-                      android:stateNotNeeded="true"
-                      android:clearTaskOnLaunch="true"
-                      android:excludeFromRecents="true"
-                      android:windowSoftInputMode="adjustPan"
-                      android:screenOrientation="portrait"
-                      android:theme="@style/LaunchTheme"
-                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
-                      <meta-data
-                          android:name="io.flutter.embedding.android.NormalTheme"
-                          android:resource="@style/NormalTheme" />
-                      <meta-data
-                          android:name="io.flutter.embedding.android.SplashScreenDrawable"
-                          android:resource="@drawable/launch_background" />
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                          <category android:name="android.intent.category.HOME" />
-                          <category android:name="android.intent.category.DEFAULT" />
-                      </intent-filter>
-                  </activity>
-                  <meta-data
-                      android:name="flutterEmbedding"
-                      android:value="2" />
-              </application>
-          </manifest>
-          EOF
-
-          # 2. Configure transparent wallpaper styles
-          cat > build_app/android/app/src/main/res/values/styles.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="LaunchTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <item name="android:windowShowWallpaper">true</item>
-                  <item name="android:windowBackground">@android:color/transparent</item>
-                  <item name="android:statusBarColor">@android:color/transparent</item>
-                  <item name="android:navigationBarColor">@android:color/transparent</item>
-              </style>
-              <style name="NormalTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <item name="android:windowShowWallpaper">true</item>
-                  <item name="android:windowBackground">@android:color/transparent</item>
-                  <item name="android:statusBarColor">@android:color/transparent</item>
-                  <item name="android:navigationBarColor">@android:color/transparent</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > build_app/android/app/src/main/res/values-night/styles.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="LaunchTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <item name="android:windowShowWallpaper">true</item>
-                  <item name="android:windowBackground">@android:color/transparent</item>
-                  <item name="android:statusBarColor">@android:color/transparent</item>
-                  <item name="android:navigationBarColor">@android:color/transparent</item>
-              </style>
-              <style name="NormalTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <item name="android:windowShowWallpaper">true</item>
-                  <item name="android:windowBackground">@android:color/transparent</item>
-                  <item name="android:statusBarColor">@android:color/transparent</item>
-                  <item name="android:navigationBarColor">@android:color/transparent</item>
-              </style>
-          </resources>
-          EOF
-
-          # 3. Write Native Kotlin MainActivity with 120Hz Display Mode Enforcer
-          mkdir -p build_app/android/app/src/main/kotlin/com/alexdesrosier/pixel_launcher
-          cat > build_app/android/app/src/main/kotlin/com/alexdesrosier/pixel_launcher/MainActivity.kt << 'EOF'
-          package com.alexdesrosier.pixel_launcher
-
-          import android.content.Intent
-          import android.graphics.Bitmap
-          import android.graphics.Canvas
-          import android.graphics.drawable.Drawable
-          import android.net.Uri
-          import android.os.Build
-          import android.os.Bundle
-          import android.provider.Settings
-          import android.view.WindowManager
-          import io.flutter.embedding.android.FlutterActivity
-          import io.flutter.embedding.engine.FlutterEngine
-          import io.flutter.embedding.android.TransparencyMode
-          import io.flutter.plugin.common.MethodChannel
-          import java.io.ByteArrayOutputStream
-          import java.util.concurrent.Executors
-
-          class MainActivity: FlutterActivity() {
-              private val CHANNEL = "pixellauncher/native"
-              private val executor = Executors.newSingleThreadExecutor()
-
-              override fun getTransparencyMode(): TransparencyMode {
-                  return TransparencyMode.transparent
-              }
-
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
-                  enableHighRefreshRate()
-              }
-
-              override fun onResume() {
-                  super.onResume()
-                  enableHighRefreshRate()
-              }
-
-              private fun enableHighRefreshRate() {
-                  try {
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                          val disp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                              display
-                          } else {
-                              @Suppress("DEPRECATION")
-                              windowManager.defaultDisplay
-                          }
-                          val modes = disp?.supportedModes
-                          if (modes != null && modes.isNotEmpty()) {
-                              val highestMode = modes.maxByOrNull { it.refreshRate }
-                              if (highestMode != null) {
-                                  val params = window.attributes
-                                  params.preferredDisplayModeId = highestMode.modeId
-                                  params.preferredRefreshRate = highestMode.refreshRate
-                                  window.attributes = params
-                              }
-                          }
-                      }
-                  } catch (_: Exception) {}
-              }
-
-              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                  super.configureFlutterEngine(flutterEngine)
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-                      when (call.method) {
-                          "getApps" -> {
-                              executor.execute {
-                                  val pm = packageManager
-                                  val intent = Intent(Intent.ACTION_MAIN, null).apply {
-                                      addCategory(Intent.CATEGORY_LAUNCHER)
-                                  }
-                                  val resolveInfos = pm.queryIntentActivities(intent, 0)
-                                  val apps = ArrayList<Map<String, Any>>()
-                                  val myPkg = packageName
-                                  for (ri in resolveInfos) {
-                                      val pkg = ri.activityInfo.packageName
-                                      if (pkg == myPkg) continue
-                                      val label = ri.loadLabel(pm).toString()
-                                      val iconDrawable = ri.loadIcon(pm)
-                                      val iconBytes = drawableToBytes(iconDrawable)
-                                      apps.add(mapOf(
-                                          "name" to label,
-                                          "pkg" to pkg,
-                                          "icon" to iconBytes
-                                      ))
-                                  }
-                                  apps.sortBy { (it["name"] as String).lowercase() }
-                                  runOnUiThread { result.success(apps) }
-                              }
-                          }
-                          "launchApp" -> {
-                              val pkg = call.argument<String>("pkg")
-                              if (pkg != null) {
-                                  val launchIntent = packageManager.getLaunchIntentForPackage(pkg)
-                                  if (launchIntent != null) {
-                                      launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                      startActivity(launchIntent)
-                                      result.success(true)
-                                  } else {
-                                      result.success(false)
-                                  }
-                              } else {
-                                  result.success(false)
-                              }
-                          }
-                          "appInfo" -> {
-                              val pkg = call.argument<String>("pkg")
-                              if (pkg != null) {
-                                  val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                      data = Uri.fromParts("package", pkg, null)
-                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                  }
-                                  startActivity(intent)
-                              }
-                              result.success(true)
-                          }
-                          "uninstallApp" -> {
-                              val pkg = call.argument<String>("pkg")
-                              if (pkg != null) {
-                                  val intent = Intent(Intent.ACTION_DELETE).apply {
-                                      data = Uri.fromParts("package", pkg, null)
-                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                  }
-                                  startActivity(intent)
-                              }
-                              result.success(true)
-                          }
-                          "openDefaultSettings" -> {
-                              try {
-                                  val intent = Intent(Settings.ACTION_HOME_SETTINGS).apply {
-                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                  }
-                                  startActivity(intent)
-                              } catch (_: Exception) {
-                                  val intent = Intent(Settings.ACTION_SETTINGS).apply {
-                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                  }
-                                  startActivity(intent)
-                              }
-                              result.success(true)
-                          }
-                          "pickWallpaper" -> {
-                              try {
-                                  val intent = Intent(Intent.ACTION_SET_WALLPAPER).apply {
-                                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                  }
-                                  startActivity(Intent.createChooser(intent, "Select Wallpaper"))
-                              } catch (_: Exception) {}
-                              result.success(true)
-                          }
-                          "openUrl" -> {
-                              val url = call.argument<String>("url")
-                              if (url != null) {
-                                  try {
-                                      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                      }
-                                      startActivity(intent)
-                                  } catch (_: Exception) {}
-                              }
-                              result.success(true)
-                          }
-                          else -> result.notImplemented()
-                      }
-                  }
-              }
-
-              private fun drawableToBytes(drawable: Drawable): ByteArray {
-                  val size = 144
-                  val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-                  val canvas = Canvas(bmp)
-                  drawable.setBounds(0, 0, size, size)
-                  drawable.draw(canvas)
-                  val stream = ByteArrayOutputStream()
-                  bmp.compress(Bitmap.CompressFormat.PNG, 90, stream)
-                  return stream.toByteArray()
-              }
-          }
-          EOF
-
-      - name: Build Release APK
-        working-directory: build_app
-        run: |
-          flutter pub get
-          flutter build apk --release
-
-      - name: Upload Release APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
-          path: build_app/build/app/outputs/flutter-apk/app-release.apk
+          name: release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
