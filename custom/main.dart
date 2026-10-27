@@ -95,7 +95,7 @@ class LauncherState extends ChangeNotifier {
 
   List<AppItem> apps = [];
   List<String> dockPkgs = [];
-  List<String> homePkgs = [];
+  Map<int, String> homeSlots = {}; // slotIndex -> packageName
   bool loading = true;
 
   bool amoledMode = false;
@@ -103,6 +103,7 @@ class LauncherState extends ChangeNotifier {
   bool dynamicWallpaperColor = true;
   int seedIndex = 0;
   int gridCols = 4;
+  int gridRows = 5;
   bool showLabels = true;
   IconShape iconShape = IconShape.circle;
 
@@ -113,14 +114,29 @@ class LauncherState extends ChangeNotifier {
     dynamicWallpaperColor = _prefs?.getBool('dyn') ?? true;
     seedIndex = (_prefs?.getInt('seed') ?? 0).clamp(0, seedOptions.length - 1);
     gridCols = (_prefs?.getInt('cols') ?? 4).clamp(4, 5);
+    gridRows = (_prefs?.getInt('rows') ?? 5).clamp(4, 6);
     showLabels = _prefs?.getBool('labels') ?? true;
     final shapeIdx = (_prefs?.getInt('shape') ?? 0)
         .clamp(0, IconShape.values.length - 1);
     iconShape = IconShape.values[shapeIdx];
     dockPkgs = _prefs?.getStringList('dock') ?? [];
-    homePkgs = _prefs?.getStringList('home') ?? [];
+
+    final rawSlots = _prefs?.getStringList('home_slots') ?? [];
+    homeSlots = {};
+    for (int i = 0; i < rawSlots.length; i++) {
+      if (rawSlots[i].isNotEmpty) {
+        homeSlots[i] = rawSlots[i];
+      }
+    }
+
     notifyListeners();
     await refreshApps();
+  }
+
+  void _saveHomeSlots() {
+    final total = gridCols * gridRows;
+    final list = List.generate(total, (i) => homeSlots[i] ?? '');
+    _prefs?.setStringList('home_slots', list);
   }
 
   Future<void> refreshApps() async {
@@ -140,6 +156,7 @@ class LauncherState extends ChangeNotifier {
         }
         apps = loaded;
 
+        // Populate dock defaults
         if (dockPkgs.isEmpty && apps.isNotEmpty) {
           final defaults = <String>[];
           for (final a in apps) {
@@ -167,14 +184,17 @@ class LauncherState extends ChangeNotifier {
           _prefs?.setStringList('dock', dockPkgs);
         }
 
-        if (homePkgs.isEmpty && apps.isNotEmpty) {
-          final favs = <String>[];
+        // Populate initial home grid slots if empty
+        if (homeSlots.isEmpty && apps.isNotEmpty) {
+          int slot = 0;
           for (final a in apps) {
-            if (!dockPkgs.contains(a.pkg)) favs.add(a.pkg);
-            if (favs.length >= 8) break;
+            if (!dockPkgs.contains(a.pkg)) {
+              homeSlots[slot] = a.pkg;
+              slot++;
+              if (slot >= gridCols * gridRows) break;
+            }
           }
-          homePkgs = favs;
-          _prefs?.setStringList('home', homePkgs);
+          _saveHomeSlots();
         }
       }
     } catch (_) {}
@@ -190,14 +210,6 @@ class LauncherState extends ChangeNotifier {
     ];
   }
 
-  List<AppItem> get homeApps {
-    final map = {for (final a in apps) a.pkg: a};
-    return [
-      for (final p in homePkgs)
-        if (map[p] != null) map[p]!
-    ];
-  }
-
   void toggleDock(String pkg) {
     if (dockPkgs.contains(pkg)) {
       dockPkgs.remove(pkg);
@@ -209,14 +221,37 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggleHome(String pkg) {
-    if (homePkgs.contains(pkg)) {
-      homePkgs.remove(pkg);
-    } else {
-      if (homePkgs.length >= 12) homePkgs.removeLast();
-      homePkgs.add(pkg);
+  void moveHomeSlot(int fromIndex, int toIndex) {
+    final appPkg = homeSlots[fromIndex];
+    final targetPkg = homeSlots[toIndex];
+
+    if (appPkg != null) {
+      homeSlots[toIndex] = appPkg;
+      if (targetPkg != null) {
+        homeSlots[fromIndex] = targetPkg;
+      } else {
+        homeSlots.remove(fromIndex);
+      }
+      _saveHomeSlots();
+      notifyListeners();
     }
-    _prefs?.setStringList('home', homePkgs);
+  }
+
+  void addOrMoveToHome(String pkg) {
+    if (homeSlots.containsValue(pkg)) return;
+    for (int i = 0; i < gridCols * gridRows; i++) {
+      if (!homeSlots.containsKey(i)) {
+        homeSlots[i] = pkg;
+        _saveHomeSlots();
+        notifyListeners();
+        break;
+      }
+    }
+  }
+
+  void removeFromHome(String pkg) {
+    homeSlots.removeWhere((k, v) => v == pkg);
+    _saveHomeSlots();
     notifyListeners();
   }
 
@@ -252,9 +287,11 @@ class LauncherState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setCols(int c) {
-    gridCols = c;
-    _prefs?.setInt('cols', c);
+  void setGridSize(int cols, int rows) {
+    gridCols = cols;
+    gridRows = rows;
+    _prefs?.setInt('cols', cols);
+    _prefs?.setInt('rows', rows);
     notifyListeners();
   }
 
@@ -501,10 +538,10 @@ class _LauncherShellState extends State<LauncherShell>
     }
   }
 
-  void _showAppMenu(AppItem app) {
+  void _showAppMenu(AppItem app, {bool isHomePin = false}) {
     HapticFeedback.mediumImpact();
     final inDock = state.dockPkgs.contains(app.pkg);
-    final inHome = state.homePkgs.contains(app.pkg);
+    final inHome = state.homeSlots.containsValue(app.pkg);
     final cs = Theme.of(context).colorScheme;
 
     showModalBottomSheet<void>(
@@ -554,7 +591,11 @@ class _LauncherShellState extends State<LauncherShell>
                   ),
                   onTap: () {
                     Navigator.pop(ctx);
-                    state.toggleHome(app.pkg);
+                    if (inHome) {
+                      state.removeFromHome(app.pkg);
+                    } else {
+                      state.addOrMoveToHome(app.pkg);
+                    }
                   },
                 ),
                 ListTile(
@@ -690,8 +731,9 @@ class _LauncherShellState extends State<LauncherShell>
 
   Widget _buildHomePage(BuildContext context, double screenHeight) {
     final cs = Theme.of(context).colorScheme;
-    final homeApps = state.homeApps;
     final dockApps = state.dockApps;
+    final totalSlots = state.gridCols * state.gridRows;
+    final appMap = {for (final a in state.apps) a.pkg: a};
 
     return GestureDetector(
       onLongPress: _openLauncherSettings,
@@ -739,35 +781,86 @@ class _LauncherShellState extends State<LauncherShell>
                       backgroundColor: Colors.black.withValues(alpha: 0.38),
                     ),
                     icon: const Icon(Icons.tune_rounded, color: Colors.white),
-                    tooltip: 'Home Settings & Icon Shapes',
+                    tooltip: 'Home Settings & Grid',
                   ),
                 ],
               ),
               const Spacer(),
-              if (homeApps.isNotEmpty)
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.only(bottom: 20),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: state.gridCols,
-                    mainAxisSpacing: 18,
-                    crossAxisSpacing: 14,
-                    childAspectRatio: 0.82,
-                  ),
-                  itemCount: homeApps.length,
-                  itemBuilder: (ctx, i) {
-                    final app = homeApps[i];
-                    return AppIconTile(
-                      app: app,
-                      shape: state.iconShape,
-                      showLabel: state.showLabels,
-                      size: 56,
-                      onTap: () => state.launch(app.pkg),
-                      onLongPress: () => _showAppMenu(app),
-                    );
-                  },
+
+              // Drag & Drop Home Screen Grid
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 20),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: state.gridCols,
+                  mainAxisSpacing: 14,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.82,
                 ),
+                itemCount: totalSlots,
+                itemBuilder: (ctx, slotIndex) {
+                  final pkg = state.homeSlots[slotIndex];
+                  final app = pkg != null ? appMap[pkg] : null;
+
+                  return DragTarget<int>(
+                    onWillAcceptWithDetails: (details) => true,
+                    onAcceptWithDetails: (details) {
+                      HapticFeedback.mediumImpact();
+                      state.moveHomeSlot(details.data, slotIndex);
+                    },
+                    builder: (context, candidateData, rejectedData) {
+                      if (app == null) {
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: candidateData.isNotEmpty
+                                ? Colors.white.withValues(alpha: 0.15)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        );
+                      }
+                      return LongPressDraggable<int>(
+                        data: slotIndex,
+                        feedback: Material(
+                          color: Colors.transparent,
+                          child: Opacity(
+                            opacity: 0.85,
+                            child: AppIconTile(
+                              app: app,
+                              shape: state.iconShape,
+                              showLabel: state.showLabels,
+                              size: 56,
+                              onTap: () {},
+                              onLongPress: () {},
+                            ),
+                          ),
+                        ),
+                        childWhenDragging: Opacity(
+                          opacity: 0.3,
+                          child: AppIconTile(
+                            app: app,
+                            shape: state.iconShape,
+                            showLabel: state.showLabels,
+                            size: 56,
+                            onTap: () {},
+                            onLongPress: () {},
+                          ),
+                        ),
+                        child: AppIconTile(
+                          app: app,
+                          shape: state.iconShape,
+                          showLabel: state.showLabels,
+                          size: 56,
+                          onTap: () => state.launch(app.pkg),
+                          onLongPress: () => _showAppMenu(app),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+
               GestureDetector(
                 onTap: _openDrawer,
                 child: _buildGlassBox(
@@ -864,8 +957,9 @@ class _LauncherShellState extends State<LauncherShell>
         child: Column(
           children: [
             GestureDetector(
-              onVerticalDragUpdate: (d) =>
-                  _onVerticalDragUpdate(d, screenHeight),
+              onVerticalDragUpdate: (d) {
+                _onVerticalDragUpdate(d, screenHeight);
+              },
               onVerticalDragEnd: _onVerticalDragEnd,
               behavior: HitTestBehavior.opaque,
               child: Padding(
@@ -933,8 +1027,9 @@ class _LauncherShellState extends State<LauncherShell>
                   ? const Center(child: CircularProgressIndicator())
                   : NotificationListener<ScrollNotification>(
                       onNotification: (n) {
+                        // Smooth pull-down to return home from top of app list
                         if (n is OverscrollNotification &&
-                            n.overscroll < -18 &&
+                            n.overscroll < -12 &&
                             _gridScrollCtrl.offset <= 0) {
                           _closeDrawer();
                           return true;
@@ -997,7 +1092,6 @@ class _LauncherShellState extends State<LauncherShell>
             return Stack(
               fit: StackFit.expand,
               children: [
-                // Home Screen Layer
                 IgnorePointer(
                   ignoring: v > 0.1,
                   child: Opacity(
@@ -1010,7 +1104,6 @@ class _LauncherShellState extends State<LauncherShell>
                     ),
                   ),
                 ),
-                // Pre-built 120Hz App Drawer Layer
                 IgnorePointer(
                   ignoring: v < 0.05,
                   child: FractionalTranslation(
@@ -1040,8 +1133,8 @@ class LauncherSettingsSheet extends StatelessWidget {
         final cs = Theme.of(context).colorScheme;
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.78,
-          maxChildSize: 0.94,
+          initialChildSize: 0.82,
+          maxChildSize: 0.95,
           minChildSize: 0.5,
           builder: (ctx, scrollCtrl) {
             return ListView(
@@ -1070,7 +1163,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Pixel Launcher 120Hz',
+                              'Pixel Launcher Grid',
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w800,
@@ -1093,7 +1186,72 @@ class LauncherSettingsSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
 
-                // App Icon Shape Selector
+                // Grid Dimensions Selector
+                const Text(
+                  'Home Screen Grid Size',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: () => state.setGridSize(4, 4),
+                        style: FilledButton.styleFrom(
+                          backgroundColor:
+                              state.gridCols == 4 && state.gridRows == 4
+                                  ? cs.primaryContainer
+                                  : const Color(0xFF1C1C20),
+                        ),
+                        child: const Text('4 x 4'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: () => state.setGridSize(4, 5),
+                        style: FilledButton.styleFrom(
+                          backgroundColor:
+                              state.gridCols == 4 && state.gridRows == 5
+                                  ? cs.primaryContainer
+                                  : const Color(0xFF1C1C20),
+                        ),
+                        child: const Text('4 x 5'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: () => state.setGridSize(5, 5),
+                        style: FilledButton.styleFrom(
+                          backgroundColor:
+                              state.gridCols == 5 && state.gridRows == 5
+                                  ? cs.primaryContainer
+                                  : const Color(0xFF1C1C20),
+                        ),
+                        child: const Text('5 x 5'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonal(
+                        onPressed: () => state.setGridSize(5, 6),
+                        style: FilledButton.styleFrom(
+                          backgroundColor:
+                              state.gridCols == 5 && state.gridRows == 6
+                                  ? cs.primaryContainer
+                                  : const Color(0xFF1C1C20),
+                        ),
+                        child: const Text('5 x 6'),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 18),
                 const Text(
                   'App Icon Shape',
                   style: TextStyle(
@@ -1205,23 +1363,6 @@ class LauncherSettingsSheet extends StatelessWidget {
                   onChanged: state.setShowLabels,
                   title: const Text('Show App Icon Labels',
                       style: TextStyle(color: Colors.white)),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Grid Columns',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment(value: 4, label: Text('4 Columns')),
-                    ButtonSegment(value: 5, label: Text('5 Columns')),
-                  ],
-                  selected: {state.gridCols},
-                  onSelectionChanged: (s) => state.setCols(s.first),
                 ),
                 const SizedBox(height: 20),
                 const Text(
