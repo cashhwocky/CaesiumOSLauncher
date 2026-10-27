@@ -31,7 +31,7 @@ jobs:
           name: caesium_launcher
           description: Custom Material You Caesium Launcher by Alex Desrosier.
           publish_to: 'none'
-          version: 2.1.0+9
+          version: 2.2.0+10
 
           environment:
             sdk: '>=3.4.0 <4.0.0'
@@ -78,7 +78,7 @@ jobs:
                           android:resource="@style/NormalTheme" />
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.action.LAUNCHER" />
+                          <category android:name="android.intent.category.LAUNCHER" />
                           <category android:name="android.intent.category.HOME" />
                           <category android:name="android.intent.category.DEFAULT" />
                       </intent-filter>
@@ -130,6 +130,7 @@ jobs:
           cat > build_app/android/app/src/main/kotlin/com/alexdesrosier/caesium_launcher/MainActivity.kt << 'EOF'
           package com.alexdesrosier.caesium_launcher
 
+          import android.annotation.SuppressLint
           import android.content.BroadcastReceiver
           import android.content.Context
           import android.content.Intent
@@ -220,11 +221,34 @@ jobs:
                           }
                       }
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                          val params = window.attributes
-                          params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                          window.attributes = params
+                        val params = window.attributes
+                        params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                        window.attributes = params
                       }
                   } catch (_: Exception) {}
+              }
+
+              @SuppressLint("WrongConstant")
+              private fun expandStatusBar() {
+                  try {
+                      val service = getSystemService("statusbar")
+                      val svcClass = Class.forName("android.app.StatusBarManager")
+                      val method = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                          svcClass.getMethod("expandNotificationsPanel")
+                      } else {
+                          svcClass.getMethod("expand")
+                      }
+                      method.isAccessible = true
+                      method.invoke(service)
+                  } catch (e: Exception) {
+                      try {
+                          @SuppressWarnings("WrongConstant")
+                          val s = getSystemService("statusbar")
+                          val m = s.javaClass.getMethod("collapsePanels")
+                          m.isAccessible = true
+                          m.invoke(s)
+                      } catch (_: Exception) {}
+                  }
               }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -234,6 +258,10 @@ jobs:
 
                   channel.setMethodCallHandler { call, result ->
                       when (call.method) {
+                          "expandNotifications" -> {
+                              expandStatusBar()
+                              result.success(true)
+                          }
                           "getApps" -> {
                               executor.execute {
                                   val pm = packageManager
