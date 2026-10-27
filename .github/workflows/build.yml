@@ -23,7 +23,7 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Generate Caesium Launcher Project & 120Hz Native Bridge
+      - name: Generate Caesium Launcher Project
         run: |
           flutter create --org com.alexdesrosier --project-name caesium_launcher --platforms android build_app
 
@@ -31,7 +31,7 @@ jobs:
           name: caesium_launcher
           description: Custom iOS-Style Caesium Launcher by Alex Desrosier.
           publish_to: 'none'
-          version: 1.5.0+5
+          version: 1.6.0+6
 
           environment:
             sdk: '>=3.4.0 <4.0.0'
