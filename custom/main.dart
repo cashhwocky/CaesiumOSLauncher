@@ -50,8 +50,12 @@ class AppModel {
         lowerPkg.contains('instagram') ||
         lowerPkg.contains('whatsapp') ||
         lowerPkg.contains('messaging') ||
-        lowerPkg.contains('dialer')) {
-      return 'Social & Comm';
+        lowerPkg.contains('mms') ||
+        lowerPkg.contains('contacts') ||
+        lowerPkg.contains('dialer') ||
+        lowerPkg.contains('chrome') ||
+        lowerPkg.contains('browser')) {
+      return 'Social';
     }
     if (lowerPkg.contains('music') ||
         lowerPkg.contains('audio') ||
@@ -60,26 +64,41 @@ class AppModel {
         lowerPkg.contains('video') ||
         lowerPkg.contains('camera') ||
         lowerPkg.contains('gallery') ||
-        lowerPkg.contains('photos')) {
+        lowerPkg.contains('photos') ||
+        lowerPkg.contains('podcast') ||
+        lowerName.contains('loocal')) {
       return 'Media';
     }
     if (lowerPkg.contains('game') ||
         lowerPkg.contains('minecraft') ||
         lowerPkg.contains('fortnite') ||
-        lowerPkg.contains('roblox')) {
+        lowerPkg.contains('roblox') ||
+        lowerPkg.contains('clash') ||
+        lowerPkg.contains('steam')) {
       return 'Games';
+    }
+    if (lowerPkg.contains('calculator') ||
+        lowerPkg.contains('clock') ||
+        lowerPkg.contains('deskclock') ||
+        lowerPkg.contains('calendar') ||
+        lowerPkg.contains('files') ||
+        lowerPkg.contains('documentsui') ||
+        lowerPkg.contains('notes') ||
+        lowerPkg.contains('weather') ||
+        lowerPkg.contains('maps') ||
+        lowerPkg.contains('recorder')) {
+      return 'Tools';
     }
     if (lowerPkg.contains('settings') ||
         lowerPkg.contains('system') ||
         lowerPkg.contains('android') ||
         lowerPkg.contains('google') ||
-        lowerPkg.contains('calculator') ||
-        lowerPkg.contains('clock') ||
-        lowerPkg.contains('files') ||
+        lowerPkg.contains('vending') ||
+        lowerPkg.contains('magisk') ||
         lowerName.contains('caesium')) {
-      return 'System & Tools';
+      return 'System';
     }
-    return 'Other Apps';
+    return 'Other';
   }
 }
 
@@ -87,12 +106,12 @@ class CaesiumLauncherApp extends StatelessWidget {
   const CaesiumLauncherApp({super.key});
 
   static final _defaultLightScheme = ColorScheme.fromSeed(
-    seedColor: const Color(0xFF4F6373),
+    seedColor: const Color(0xFF8D6E63),
     brightness: Brightness.light,
   );
 
   static final _defaultDarkScheme = ColorScheme.fromSeed(
-    seedColor: const Color(0xFF8AB4F8),
+    seedColor: const Color(0xFFD7CCC8),
     brightness: Brightness.dark,
   );
 
@@ -143,7 +162,7 @@ class _LauncherHomeState extends State<LauncherHome>
   Set<String> _dismissedNewApps = {};
 
   bool _isLoading = true;
-  bool _categorizedMode = false;
+  bool _categorizedMode = true; // Default to Axion OS Smart Categories
   bool _themedIcons = false;
   bool _showRecentShelf = true;
   int _gridColumns = 4;
@@ -162,13 +181,12 @@ class _LauncherHomeState extends State<LauncherHome>
     super.initState();
     _drawerController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 260),
     );
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
 
-    // Listen for live app installs or uninstalls from Kotlin BroadcastReceiver
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onPackagesChanged') {
         final String? action = call.arguments?['action'];
@@ -177,7 +195,6 @@ class _LauncherHomeState extends State<LauncherHome>
         if (mounted && action == 'ADDED' && pkg != null) {
           final addedApp = _allApps.where((a) => a.pkg == pkg).firstOrNull;
           if (addedApp != null) {
-            // Automatically pin new app to home screen if there's space (< 16 apps)
             if (!_homeGridPackages.contains(pkg) &&
                 _homeGridPackages.length < 16) {
               setState(() => _homeGridPackages.add(pkg));
@@ -229,7 +246,7 @@ class _LauncherHomeState extends State<LauncherHome>
       _homeGridPackages = prefs.getStringList('home_grid_pkgs') ?? [];
       _dismissedNewApps =
           (prefs.getStringList('dismissed_new_pkgs') ?? []).toSet();
-      _categorizedMode = prefs.getBool('categorized_mode') ?? false;
+      _categorizedMode = prefs.getBool('axion_categories_mode') ?? true;
       _themedIcons = prefs.getBool('themed_icons') ?? false;
       _showRecentShelf = prefs.getBool('show_recent_shelf') ?? true;
       _gridColumns = prefs.getInt('grid_columns') ?? 4;
@@ -243,7 +260,7 @@ class _LauncherHomeState extends State<LauncherHome>
     await prefs.setStringList('home_grid_pkgs', _homeGridPackages);
     await prefs.setStringList(
         'dismissed_new_pkgs', _dismissedNewApps.toList());
-    await prefs.setBool('categorized_mode', _categorizedMode);
+    await prefs.setBool('axion_categories_mode', _categorizedMode);
     await prefs.setBool('themed_icons', _themedIcons);
     await prefs.setBool('show_recent_shelf', _showRecentShelf);
     await prefs.setInt('grid_columns', _gridColumns);
@@ -279,7 +296,6 @@ class _LauncherHomeState extends State<LauncherHome>
             precacheImage(app.imageProvider, context);
           }
 
-          // Compute Recently Installed Apps (sorted newest first, max 8)
           final recent = parsed
               .where((a) => a.isNew && !_dismissedNewApps.contains(a.pkg))
               .toList()
@@ -288,7 +304,7 @@ class _LauncherHomeState extends State<LauncherHome>
           setState(() {
             _allApps = parsed;
             _filteredApps = parsed;
-            _recentApps = recent.take(8).toList();
+            _recentApps = recent;
             _isLoading = false;
 
             if (_dockPackages.isEmpty && parsed.isNotEmpty) {
@@ -324,7 +340,7 @@ class _LauncherHomeState extends State<LauncherHome>
 
   void _openDrawer() {
     HapticFeedback.lightImpact();
-    _drawerController.fling(velocity: 2.2);
+    _drawerController.fling(velocity: 2.4);
   }
 
   void _closeDrawer() {
@@ -334,12 +350,11 @@ class _LauncherHomeState extends State<LauncherHome>
     if (_drawerScrollController.hasClients) {
       _drawerScrollController.jumpTo(0);
     }
-    _drawerController.fling(velocity: -2.2);
+    _drawerController.fling(velocity: -2.4);
   }
 
   Future<void> _launchApp(String pkg) async {
     HapticFeedback.selectionClick();
-    // Launching a new app clears its "NEW" badge after first launch if desired
     await _channel.invokeMethod('launchApp', {'pkg': pkg});
   }
 
@@ -365,12 +380,66 @@ class _LauncherHomeState extends State<LauncherHome>
     }
   }
 
-  Widget _buildAppIcon(AppModel app,
-      {double size = 58, bool showLabel = true, Color? textColor}) {
+  Widget _buildRawAppAvatar(AppModel app, double size) {
     final cs = Theme.of(context).colorScheme;
     final bool showNewBadge =
         app.isNew && !_dismissedNewApps.contains(app.pkg);
 
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: ShapeDecoration(
+            shape: _getShapeBorder(),
+            color: _themedIcons
+                ? cs.secondaryContainer
+                : cs.surfaceContainerHighest.withOpacity(0.35),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ColorFiltered(
+            colorFilter: _themedIcons
+                ? ColorFilter.mode(
+                    cs.onSecondaryContainer, BlendMode.modulate)
+                : const ColorFilter.mode(Colors.transparent, BlendMode.dst),
+            child: Image(
+              image: app.imageProvider,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.medium,
+            ),
+          ),
+        ),
+        if (showNewBadge && size >= 40)
+          Positioned(
+            top: -3,
+            right: -5,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: cs.tertiaryContainer,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: cs.surface, width: 1.2),
+              ),
+              child: Text(
+                'NEW',
+                style: TextStyle(
+                  fontSize: 7.5,
+                  fontWeight: FontWeight.w900,
+                  color: cs.onTertiaryContainer,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAppIcon(AppModel app,
+      {double size = 58, bool showLabel = true, Color? textColor}) {
     return GestureDetector(
       onTap: () => _launchApp(app.pkg),
       onLongPress: () => _showAppOptionsSheet(app),
@@ -379,74 +448,7 @@ class _LauncherHomeState extends State<LauncherHome>
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: size,
-                height: size,
-                decoration: ShapeDecoration(
-                  shape: _getShapeBorder(),
-                  color: _themedIcons
-                      ? cs.secondaryContainer
-                      : cs.surfaceContainerHighest.withOpacity(0.35),
-                  shadows: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.14),
-                      blurRadius: 6,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: ColorFiltered(
-                  colorFilter: _themedIcons
-                      ? ColorFilter.mode(
-                          cs.onSecondaryContainer, BlendMode.modulate)
-                      : const ColorFilter.mode(
-                          Colors.transparent, BlendMode.dst),
-                  child: Image(
-                    image: app.imageProvider,
-                    width: size,
-                    height: size,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                    filterQuality: FilterQuality.medium,
-                  ),
-                ),
-              ),
-              if (showNewBadge)
-                Positioned(
-                  top: -4,
-                  right: -6,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: cs.tertiaryContainer,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: cs.surface, width: 1.5),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black26,
-                          blurRadius: 4,
-                          offset: Offset(0, 1),
-                        )
-                      ],
-                    ),
-                    child: Text(
-                      'NEW',
-                      style: TextStyle(
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.4,
-                        color: cs.onTertiaryContainer,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+          _buildRawAppAvatar(app, size),
           if (showLabel) ...[
             const SizedBox(height: 6),
             Padding(
@@ -475,6 +477,271 @@ class _LauncherHomeState extends State<LauncherHome>
           ],
         ],
       ),
+    );
+  }
+
+  // Opens an expanded Axion OS folder popup when tapping a category or its 2x2 mini-cluster
+  void _openCategoryFolderModal(String categoryTitle, List<AppModel> apps) {
+    HapticFeedback.lightImpact();
+    final cs = Theme.of(context).colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.pop(ctx),
+          child: Center(
+            child: GestureDetector(
+              onTap: () {}, // Prevent tap-through inside card
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.88,
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.68,
+                ),
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 24),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(36),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.45),
+                      blurRadius: 30,
+                      offset: const Offset(0, 12),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          categoryTitle,
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurface,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: cs.secondaryContainer,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            '${apps.length} apps',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: cs.onSecondaryContainer,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Flexible(
+                      child: GridView.builder(
+                        shrinkWrap: true,
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: apps.length,
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          mainAxisSpacing: 16,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 0.78,
+                        ),
+                        itemBuilder: (context, idx) {
+                          final app = apps[idx];
+                          return _buildAppIcon(
+                            app,
+                            size: 54,
+                            textColor: cs.onSurface,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Builds a single Axion OS Smart Category square card (2x2 layout with mini cluster in 4th slot)
+  Widget _buildAxionCategoryCard(
+      String title, List<AppModel> apps, ColorScheme cs) {
+    final bool hasMoreThanFour = apps.length > 4;
+
+    Widget buildSlot(int slotIndex) {
+      if (slotIndex >= apps.length) {
+        return const SizedBox.shrink();
+      }
+      // 4th slot (index 3): If > 4 apps, render a 2x2 mini-icon cluster like Axion OS
+      if (slotIndex == 3 && hasMoreThanFour) {
+        final subApps = apps.skip(3).take(4).toList();
+        return GestureDetector(
+          onTap: () => _openCategoryFolderModal(title, apps),
+          behavior: HitTestBehavior.opaque,
+          child: Center(
+            child: Container(
+              width: 58,
+              height: 58,
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(0.45),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: GridView.builder(
+                physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                itemCount: subApps.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 4,
+                  crossAxisSpacing: 4,
+                ),
+                itemBuilder: (context, i) {
+                  return Center(
+                    child: _buildRawAppAvatar(subApps[i], 20),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      }
+
+      // Standard large icon in slots 0, 1, 2 (and slot 3 if <= 4 apps)
+      final app = apps[slotIndex];
+      return GestureDetector(
+        onTap: () => _launchApp(app.pkg),
+        onLongPress: () => _showAppOptionsSheet(app),
+        behavior: HitTestBehavior.opaque,
+        child: Center(
+          child: _buildRawAppAvatar(app, 58),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: () => _openCategoryFolderModal(title, apps),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow.withOpacity(0.88),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: cs.outlineVariant.withOpacity(0.16),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 2, bottom: 10),
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurface.withOpacity(0.88),
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: buildSlot(0)),
+                        const SizedBox(width: 8),
+                        Expanded(child: buildSlot(1)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: buildSlot(2)),
+                        const SizedBox(width: 8),
+                        Expanded(child: buildSlot(3)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAxionCategorizedGrid(ColorScheme cs) {
+    final Map<String, List<AppModel>> groups = {};
+
+    // Optional "New" smart category card if new apps were recently installed
+    if (_showRecentShelf && _recentApps.isNotEmpty) {
+      groups['New & Recent'] = _recentApps;
+    }
+
+    const orderedCategories = [
+      'Social',
+      'Media',
+      'Games',
+      'Tools',
+      'System',
+      'Other'
+    ];
+    for (final cat in orderedCategories) {
+      final matching = _filteredApps.where((a) => a.category == cat).toList();
+      if (matching.isNotEmpty) {
+        groups[cat] = matching;
+      }
+    }
+
+    final categoryKeys = groups.keys.toList();
+
+    return GridView.builder(
+      controller: _drawerScrollController,
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 28),
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
+      cacheExtent: 1200,
+      itemCount: categoryKeys.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 14,
+        childAspectRatio: 0.92,
+      ),
+      itemBuilder: (context, idx) {
+        final title = categoryKeys[idx];
+        final apps = groups[title]!;
+        return RepaintBoundary(
+          child: _buildAxionCategoryCard(title, apps, cs),
+        );
+      },
     );
   }
 
@@ -689,7 +956,19 @@ class _LauncherHomeState extends State<LauncherHome>
                     const SizedBox(height: 12),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Show Recently Installed'),
+                      title: const Text('Axion OS Smart Categories'),
+                      subtitle: const Text(
+                          'Organize App Drawer into 2-column Bento cards'),
+                      value: _categorizedMode,
+                      onChanged: (val) {
+                        setState(() => _categorizedMode = val);
+                        setSheetState(() {});
+                        _savePreferences();
+                      },
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Show New & Recent Folder'),
                       subtitle: const Text(
                           'Highlight newly downloaded apps (last 48h)'),
                       value: _showRecentShelf,
@@ -711,22 +990,11 @@ class _LauncherHomeState extends State<LauncherHome>
                         _savePreferences();
                       },
                     ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Categorized App Drawer'),
-                      subtitle: const Text('Group apps into smart folders'),
-                      value: _categorizedMode,
-                      onChanged: (val) {
-                        setState(() => _categorizedMode = val);
-                        setSheetState(() {});
-                        _savePreferences();
-                      },
-                    ),
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Grid Columns'),
+                        const Text('Home Grid Columns'),
                         SegmentedButton<int>(
                           segments: const [
                             ButtonSegment(value: 4, label: Text('4x')),
@@ -826,7 +1094,6 @@ class _LauncherHomeState extends State<LauncherHome>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Pixel At-a-Glance & Material You Clock Pill
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -897,7 +1164,6 @@ class _LauncherHomeState extends State<LauncherHome>
               ),
               const SizedBox(height: 28),
 
-              // Home Screen Pinned Apps Grid
               Expanded(
                 child: GridView.builder(
                   physics: const NeverScrollableScrollPhysics(),
@@ -916,7 +1182,6 @@ class _LauncherHomeState extends State<LauncherHome>
                 ),
               ),
 
-              // Bottom Search Pill
               GestureDetector(
                 onTap: () {
                   _openDrawer();
@@ -944,7 +1209,7 @@ class _LauncherHomeState extends State<LauncherHome>
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Search apps or web...',
+                          'Search apps...',
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
@@ -963,7 +1228,6 @@ class _LauncherHomeState extends State<LauncherHome>
               ),
               const SizedBox(height: 16),
 
-              // Floating Material You Tonal Dock
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1011,109 +1275,29 @@ class _LauncherHomeState extends State<LauncherHome>
     );
   }
 
-  Widget _buildRecentlyInstalledShelf(ColorScheme cs) {
-    if (!_showRecentShelf ||
-        _recentApps.isEmpty ||
-        _searchController.text.isNotEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-      decoration: BoxDecoration(
-        color: cs.secondaryContainer.withOpacity(0.45),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: cs.primary.withOpacity(0.18)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.auto_awesome_rounded,
-                      size: 16, color: cs.primary),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Recently Installed',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: cs.primary,
-                    ),
-                  ),
-                ],
-              ),
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    for (final a in _recentApps) {
-                      _dismissedNewApps.add(a.pkg);
-                    }
-                    _recentApps.clear();
-                  });
-                  _savePreferences();
-                },
-                child: Text(
-                  'Clear',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 82,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: _recentApps.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 16),
-              itemBuilder: (context, idx) {
-                final app = _recentApps[idx];
-                return SizedBox(
-                  width: 68,
-                  child: RepaintBoundary(
-                    child: _buildAppIcon(
-                      app,
-                      size: 52,
-                      textColor: cs.onSurface,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // Axion OS Style App Drawer Sheet
   Widget _buildDrawerSheet(ColorScheme cs) {
+    final bool isSearching = _searchController.text.trim().isNotEmpty;
+
     return Container(
+      margin: const EdgeInsets.only(top: 18),
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        color: cs.surface.withOpacity(0.95),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(38)),
         boxShadow: const [
           BoxShadow(
-            color: Colors.black45,
-            blurRadius: 24,
+            color: Colors.black54,
+            blurRadius: 28,
             offset: Offset(0, -4),
           ),
         ],
       ),
       child: SafeArea(
+        top: true,
         bottom: true,
         child: Column(
           children: [
-            // Drag Handle
+            // Top Pill Handle (Axion OS Style)
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onVerticalDragUpdate: (details) {
@@ -1130,64 +1314,97 @@ class _LauncherHomeState extends State<LauncherHome>
                 }
               },
               child: Padding(
-                padding: const EdgeInsets.only(top: 12, bottom: 8),
+                padding: const EdgeInsets.only(top: 14, bottom: 16),
                 child: Center(
                   child: Container(
-                    width: 42,
-                    height: 5,
+                    width: 46,
+                    height: 5.5,
                     decoration: BoxDecoration(
-                      color: cs.onSurfaceVariant.withOpacity(0.35),
-                      borderRadius: BorderRadius.circular(3),
+                      color: cs.onSurfaceVariant.withOpacity(0.45),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
                 ),
               ),
             ),
 
-            // Header & Mode Switch
+            // Top Pill Search Bar ("Search apps") exactly like Axion OS screenshot
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'All Apps (${_filteredApps.length})',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: cs.onSurface,
-                    ),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Container(
+                height: 54,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocus,
+                  onChanged: _filterApps,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: cs.onSurface,
                   ),
-                  FilterChip(
-                    label: Text(_categorizedMode ? 'Categories' : 'A - Z Grid'),
-                    avatar: Icon(
-                      _categorizedMode
-                          ? Icons.folder_copy_outlined
-                          : Icons.grid_view_rounded,
-                      size: 18,
+                  decoration: InputDecoration(
+                    hintText: 'Search apps',
+                    hintStyle: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w400,
+                      color: cs.onSurfaceVariant.withOpacity(0.75),
                     ),
-                    selected: _categorizedMode,
-                    onSelected: (val) {
-                      setState(() => _categorizedMode = val);
-                      _savePreferences();
-                    },
+                    prefixIcon: Icon(
+                      Icons.search_rounded,
+                      color: cs.onSurfaceVariant.withOpacity(0.8),
+                      size: 24,
+                    ),
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isSearching)
+                          IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 20),
+                            onPressed: () {
+                              _searchController.clear();
+                              _filterApps('');
+                            },
+                          ),
+                        IconButton(
+                          tooltip: _categorizedMode
+                              ? 'Switch to All Apps Grid'
+                              : 'Switch to Smart Categories',
+                          icon: Icon(
+                            _categorizedMode
+                                ? Icons.grid_view_rounded
+                                : Icons.folder_copy_rounded,
+                            size: 20,
+                            color: cs.onSurfaceVariant.withOpacity(0.8),
+                          ),
+                          onPressed: () {
+                            HapticFeedback.selectionClick();
+                            setState(
+                                () => _categorizedMode = !_categorizedMode);
+                            _savePreferences();
+                          },
+                        ),
+                      ],
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 15),
                   ),
-                ],
+                ),
               ),
             ),
 
-            // Recently Installed Shelf
-            _buildRecentlyInstalledShelf(cs),
-
-            // Main App List / Grid
+            // Main Drawer Body: 2-Column Smart Categories (or Search Results / A-Z Grid)
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : _categorizedMode
-                      ? _buildCategorizedDrawer(cs)
+                  : (_categorizedMode && !isSearching)
+                      ? _buildAxionCategorizedGrid(cs)
                       : GridView.builder(
                           controller: _drawerScrollController,
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                           physics: const BouncingScrollPhysics(
                             parent: AlwaysScrollableScrollPhysics(),
                           ),
@@ -1212,138 +1429,9 @@ class _LauncherHomeState extends State<LauncherHome>
                           },
                         ),
             ),
-
-            // Bottom Search Bar
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerLow,
-                border: Border(
-                  top: BorderSide(
-                    color: cs.outlineVariant.withOpacity(0.3),
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocus,
-                      onChanged: _filterApps,
-                      style: TextStyle(color: cs.onSurface),
-                      decoration: InputDecoration(
-                        hintText: 'Search installed apps...',
-                        hintStyle: TextStyle(color: cs.onSurfaceVariant),
-                        prefixIcon:
-                            Icon(Icons.search_rounded, color: cs.primary),
-                        suffixIcon: _searchController.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear_rounded),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  _filterApps('');
-                                },
-                              )
-                            : null,
-                        filled: true,
-                        fillColor: cs.surfaceContainerHighest.withOpacity(0.65),
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 12),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(28),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  IconButton.filledTonal(
-                    onPressed: _closeDrawer,
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                    tooltip: 'Close Drawer',
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildCategorizedDrawer(ColorScheme cs) {
-    final Map<String, List<AppModel>> groups = {};
-    for (final app in _filteredApps) {
-      groups.putIfAbsent(app.category, () => []).add(app);
-    }
-    final categories = groups.keys.toList()..sort();
-
-    return ListView.builder(
-      controller: _drawerScrollController,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-      physics: const BouncingScrollPhysics(),
-      cacheExtent: 1200,
-      itemCount: categories.length,
-      itemBuilder: (context, idx) {
-        final category = categories[idx];
-        final apps = groups[category]!;
-        return Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: cs.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: cs.primary,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '$category (${apps.length})',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: cs.primary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: apps.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: _gridColumns,
-                  mainAxisSpacing: 14,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 0.80,
-                ),
-                itemBuilder: (context, i) {
-                  return RepaintBoundary(
-                    child: _buildAppIcon(
-                      apps[i],
-                      size: 52,
-                      textColor: cs.onSurface,
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
@@ -1377,7 +1465,7 @@ class _LauncherHomeState extends State<LauncherHome>
                     GestureDetector(
                       onTap: _closeDrawer,
                       child: Container(
-                        color: Colors.black.withOpacity(0.45 * val),
+                        color: Colors.black.withOpacity(0.55 * val),
                       ),
                     ),
                     FractionalTranslation(
