@@ -23,7 +23,7 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Generate Caesium Launcher Project
+      - name: Generate Caesium Launcher Project & 120Hz Native Bridge
         run: |
           flutter create --org com.alexdesrosier --project-name caesium_launcher --platforms android build_app
 
@@ -31,7 +31,7 @@ jobs:
           name: caesium_launcher
           description: Custom iOS-Style Caesium Launcher by Alex Desrosier.
           publish_to: 'none'
-          version: 1.6.0+6
+          version: 1.7.0+7
 
           environment:
             sdk: '>=3.4.0 <4.0.0'
@@ -155,28 +155,33 @@ jobs:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER)
-                  enableHighRefreshRate()
+                  forceMaxRefreshRate()
               }
 
               override fun onResume() {
                   super.onResume()
-                  enableHighRefreshRate()
+                  forceMaxRefreshRate()
               }
 
-              private fun enableHighRefreshRate() {
+              private fun forceMaxRefreshRate() {
                   try {
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                           val disp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else windowManager.defaultDisplay
                           val modes = disp?.supportedModes
                           if (modes != null && modes.isNotEmpty()) {
-                              val highestMode = modes.maxByOrNull { it.refreshRate }
-                              if (highestMode != null) {
+                              val maxMode = modes.maxByOrNull { it.refreshRate }
+                              if (maxMode != null) {
                                   val params = window.attributes
-                                  params.preferredDisplayModeId = highestMode.modeId
-                                  params.preferredRefreshRate = highestMode.refreshRate
+                                  params.preferredDisplayModeId = maxMode.modeId
+                                  params.preferredRefreshRate = maxMode.refreshRate
                                   window.attributes = params
                               }
                           }
+                      }
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                          val params = window.attributes
+                          params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                          window.attributes = params
                       }
                   } catch (_: Exception) {}
               }
