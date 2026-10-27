@@ -112,7 +112,7 @@ class LauncherState extends ChangeNotifier {
   bool dynamicWallpaperColor = true;
   int seedIndex = 0;
   int gridCols = 4;
-  int gridRows = 5;
+  int gridRows = 4;
   bool showLabels = true;
   IconShape iconShape = IconShape.squircle;
 
@@ -123,7 +123,7 @@ class LauncherState extends ChangeNotifier {
     dynamicWallpaperColor = _prefs?.getBool('dyn') ?? true;
     seedIndex = (_prefs?.getInt('seed') ?? 0).clamp(0, seedOptions.length - 1);
     gridCols = (_prefs?.getInt('cols') ?? 4).clamp(4, 5);
-    gridRows = (_prefs?.getInt('rows') ?? 5).clamp(4, 6);
+    gridRows = (_prefs?.getInt('rows') ?? 4).clamp(4, 5);
     showLabels = _prefs?.getBool('labels') ?? true;
     final shapeIdx = (_prefs?.getInt('shape') ?? 1)
         .clamp(0, IconShape.values.length - 1);
@@ -492,7 +492,7 @@ class AppIconTile extends StatelessWidget {
               ),
             ),
             if (showLabel) ...[
-              const SizedBox(height: 5),
+              const SizedBox(height: 6),
               Text(
                 app.name,
                 maxLines: 1,
@@ -797,14 +797,14 @@ class _LauncherShellState extends State<LauncherShell>
       decoration: BoxDecoration(
         color: state.amoledMode
             ? const Color(0xFF121216)
-            : Colors.black.withValues(alpha: 0.38),
+            : Colors.black.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x33000000),
-            blurRadius: 16,
-            offset: Offset(0, 6),
+            blurRadius: 18,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -825,18 +825,18 @@ class _LauncherShellState extends State<LauncherShell>
       behavior: HitTestBehavior.translucent,
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // iOS-Style Large Header Widget & Time Card
+              // iOS-Style Glass Widget Card Header
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
                     child: _buildGlassBox(
-                      radius: 28,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                      radius: 30,
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -846,35 +846,35 @@ class _LauncherShellState extends State<LauncherShell>
                               Text(
                                 _formatDate(_now).toUpperCase(),
                                 style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 11,
+                                  color: Colors.white60,
+                                  fontSize: 10,
                                   fontWeight: FontWeight.w700,
-                                  letterSpacing: 1.2,
+                                  letterSpacing: 1.4,
                                 ),
                               ),
-                              const SizedBox(height: 2),
+                              const SizedBox(height: 3),
                               Text(
                                 _formatTime(_now),
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 36,
+                                  fontSize: 38,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: -1,
                                 ),
                               ),
                             ],
                           ),
-                          const Icon(Icons.wb_sunny_rounded, color: Colors.amberAccent, size: 32),
+                          const Icon(Icons.cloud_queue_rounded, color: Colors.white70, size: 34),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   IconButton(
                     onPressed: _openLauncherSettings,
                     style: IconButton.styleFrom(
                       backgroundColor: Colors.black.withValues(alpha: 0.35),
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.all(16),
                     ),
                     icon: const Icon(Icons.settings_rounded, color: Colors.white, size: 22),
                     tooltip: 'Settings',
@@ -883,16 +883,16 @@ class _LauncherShellState extends State<LauncherShell>
               ),
               const Spacer(),
 
-              // iOS Grid layout
+              // iOS Spaced Icon Grid
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.only(bottom: 16),
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: state.gridCols,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 14,
-                  childAspectRatio: 0.8,
+                  mainAxisSpacing: 20,
+                  crossAxisSpacing: 18,
+                  childAspectRatio: 0.78,
                 ),
                 itemCount: totalSlots,
                 itemBuilder: (ctx, slotIndex) {
@@ -929,7 +929,7 @@ class _LauncherShellState extends State<LauncherShell>
                               app: app,
                               shape: state.iconShape,
                               showLabel: state.showLabels,
-                              size: 60,
+                              size: 62,
                               onTap: () {},
                               onLongPress: () {},
                             ),
@@ -941,7 +941,7 @@ class _LauncherShellState extends State<LauncherShell>
                             app: app,
                             shape: state.iconShape,
                             showLabel: state.showLabels,
-                            size: 58,
+                            size: 60,
                             onTap: () {},
                             onLongPress: () {},
                           ),
@@ -950,7 +950,7 @@ class _LauncherShellState extends State<LauncherShell>
                           app: app,
                           shape: state.iconShape,
                           showLabel: state.showLabels,
-                          size: 58,
+                          size: 60,
                           onTap: () => state.launch(app.pkg),
                           onLongPress: () => _showAppMenu(app),
                         ),
@@ -960,10 +960,10 @@ class _LauncherShellState extends State<LauncherShell>
                 },
               ),
 
-              // iOS Frosted Floating Dock
+              // iOS Frosted Floating Dock (No redundant bottom bars)
               _buildGlassBox(
-                radius: 38,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                radius: 40,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -972,7 +972,7 @@ class _LauncherShellState extends State<LauncherShell>
                         app: app,
                         shape: state.iconShape,
                         showLabel: false,
-                        size: 56,
+                        size: 58,
                         onTap: () => state.launch(app.pkg),
                         onLongPress: () => _showAppMenu(app),
                       ),
@@ -980,28 +980,14 @@ class _LauncherShellState extends State<LauncherShell>
                       const Padding(
                         padding: EdgeInsets.all(8.0),
                         child: Text(
-                          'Long-press any app in drawer to pin to dock',
+                          'Pin apps to dock',
                           style: TextStyle(color: Colors.white60, fontSize: 12),
                         ),
                       ),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 8),
-              Center(
-                child: GestureDetector(
-                  onTap: _openDrawer,
-                  child: Container(
-                    width: 130,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-              ),
+              const SizedBox(height: 12),
             ],
           ),
         ),
