@@ -80,7 +80,6 @@ class LauncherState extends ChangeNotifier {
         }
         apps = loaded;
 
-        // Auto-populate dock and home favorites on first launch
         if (dockPkgs.isEmpty && apps.isNotEmpty) {
           final defaults = <String>[];
           for (final a in apps) {
@@ -377,7 +376,7 @@ class _LauncherShellState extends State<LauncherShell>
                 const Divider(color: Colors.white12),
                 ListTile(
                   leading: Icon(
-                    inHome ? Icons.Star_rounded : Icons.star_border_rounded,
+                    inHome ? Icons.star_rounded : Icons.star_border_rounded,
                     color: cs.primary,
                   ),
                   title: Text(
@@ -581,7 +580,6 @@ class _LauncherShellState extends State<LauncherShell>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Pixel "At a Glance" Clock & Weather/System Header
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -630,7 +628,6 @@ class _LauncherShellState extends State<LauncherShell>
 
               const Spacer(),
 
-              // Pinned Home Favorites Grid
               if (homeApps.isNotEmpty)
                 GridView.builder(
                   shrinkWrap: true,
@@ -646,7 +643,6 @@ class _LauncherShellState extends State<LauncherShell>
                   itemBuilder: (ctx, i) => _buildAppIcon(homeApps[i]),
                 ),
 
-              // Universal Search Pill
               GestureDetector(
                 onTap: _openDrawer,
                 child: _buildGlassBox(
@@ -680,7 +676,6 @@ class _LauncherShellState extends State<LauncherShell>
 
               const SizedBox(height: 14),
 
-              // Frosted Bottom Dock
               _buildGlassBox(
                 radius: 34,
                 padding:
