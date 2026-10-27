@@ -1371,5 +1371,3 @@ class _LauncherHomeState extends State<LauncherHome>
     );
   }
 }
-
-```
