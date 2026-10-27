@@ -969,15 +969,21 @@ class _LauncherHomeState extends State<LauncherHome>
       behavior: HitTestBehavior.translucent,
       onLongPress: _showLauncherSettings,
       onVerticalDragUpdate: (details) {
-        // Prevent triggering the drawer if swiping near the bottom edge (prevents Recents conflict)
         final screenHeight = MediaQuery.of(context).size.height;
-        if (details.localPosition.dy > screenHeight * 0.85) return;
+        if (details.localPosition.dy > screenHeight * 0.85 ||
+            details.localPosition.dy < screenHeight * 0.12) {
+          return;
+        }
 
         _drawerController.value -= details.primaryDelta! / (screenHeight * 0.75);
       },
       onVerticalDragEnd: (details) {
         final velocity = details.primaryVelocity ?? 0;
-        // Require a firm upward velocity or drawer past 45% to open
+        if (velocity > 600 && _drawerController.value < 0.1) {
+          _channel.invokeMethod('expandNotifications');
+          return;
+        }
+
         if (velocity < -650 || _drawerController.value > 0.45) {
           _openDrawer();
         } else {
@@ -1176,12 +1182,10 @@ class _LauncherHomeState extends State<LauncherHome>
       behavior: HitTestBehavior.opaque,
       onVerticalDragUpdate: (details) {
         final screenHeight = MediaQuery.of(context).size.height;
-        // Dragging down anywhere on the drawer lowers its position
         _drawerController.value += details.primaryDelta! / (screenHeight * 0.75);
       },
       onVerticalDragEnd: (details) {
         final velocity = details.primaryVelocity ?? 0;
-        // Swipe down or fling down closes the drawer smoothly
         if (velocity > 350 || _drawerController.value < 0.65) {
           _closeDrawer();
         } else {
