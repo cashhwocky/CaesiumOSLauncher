@@ -297,7 +297,7 @@ class _LauncherHomeState extends State<LauncherHome>
 
   void _openDrawer() {
     HapticFeedback.lightImpact();
-    _drawerController.fling(velocity: 2.4);
+    _drawerController.fling(velocity: 2.8);
   }
 
   void _closeDrawer() {
@@ -307,7 +307,7 @@ class _LauncherHomeState extends State<LauncherHome>
     if (_drawerScrollController.hasClients) {
       _drawerScrollController.jumpTo(0);
     }
-    _drawerController.fling(velocity: -2.4);
+    _drawerController.fling(velocity: -2.8);
   }
 
   Future<void> _launchApp(String pkg) async {
@@ -969,12 +969,16 @@ class _LauncherHomeState extends State<LauncherHome>
       behavior: HitTestBehavior.translucent,
       onLongPress: _showLauncherSettings,
       onVerticalDragUpdate: (details) {
+        // Prevent triggering the drawer if swiping near the bottom edge (prevents Recents conflict)
         final screenHeight = MediaQuery.of(context).size.height;
+        if (details.localPosition.dy > screenHeight * 0.85) return;
+
         _drawerController.value -= details.primaryDelta! / (screenHeight * 0.75);
       },
       onVerticalDragEnd: (details) {
         final velocity = details.primaryVelocity ?? 0;
-        if (velocity < -350 || _drawerController.value > 0.35) {
+        // Require a firm upward velocity or drawer past 45% to open
+        if (velocity < -650 || _drawerController.value > 0.45) {
           _openDrawer();
         } else {
           _closeDrawer();
@@ -1168,154 +1172,159 @@ class _LauncherHomeState extends State<LauncherHome>
   Widget _buildDrawerSheet(ColorScheme cs) {
     final bool isSearching = _searchController.text.trim().isNotEmpty;
 
-    return Container(
-      margin: const EdgeInsets.only(top: 18),
-      decoration: BoxDecoration(
-        color: cs.surface.withOpacity(0.95),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(38)),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black54,
-            blurRadius: 28,
-            offset: Offset(0, -4),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: true,
-        bottom: true,
-        child: Column(
-          children: [
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onVerticalDragUpdate: (details) {
-                final screenHeight = MediaQuery.of(context).size.height;
-                _drawerController.value -=
-                    details.primaryDelta! / (screenHeight * 0.75);
-              },
-              onVerticalDragEnd: (details) {
-                final velocity = details.primaryVelocity ?? 0;
-                if (velocity > 350 || _drawerController.value < 0.65) {
-                  _closeDrawer();
-                } else {
-                  _openDrawer();
-                }
-              },
-              child: Padding(
-                padding: const EdgeInsets.only(top: 14, bottom: 16),
-                child: Center(
-                  child: Container(
-                    width: 46,
-                    height: 5.5,
-                    decoration: BoxDecoration(
-                      color: cs.onSurfaceVariant.withOpacity(0.45),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-              child: Container(
-                height: 54,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: TextField(
-                  controller: _searchController,
-                  focusNode: _searchFocus,
-                  onChanged: _filterApps,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: cs.onSurface,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'Search apps',
-                    hintStyle: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w400,
-                      color: cs.onSurfaceVariant.withOpacity(0.75),
-                    ),
-                    prefixIcon: Icon(
-                      Icons.search_rounded,
-                      color: cs.onSurfaceVariant.withOpacity(0.8),
-                      size: 24,
-                    ),
-                    suffixIcon: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (isSearching)
-                          IconButton(
-                            icon: const Icon(Icons.clear_rounded, size: 20),
-                            onPressed: () {
-                              _searchController.clear();
-                              _filterApps('');
-                            },
-                          ),
-                        IconButton(
-                          tooltip: _categorizedMode
-                              ? 'Switch to All Apps Grid'
-                              : 'Switch to Smart Categories',
-                          icon: Icon(
-                            _categorizedMode
-                                ? Icons.grid_view_rounded
-                                : Icons.folder_copy_rounded,
-                            size: 20,
-                            color: cs.onSurfaceVariant.withOpacity(0.8),
-                          ),
-                          onPressed: () {
-                            HapticFeedback.selectionClick();
-                            setState(
-                                () => _categorizedMode = !_categorizedMode);
-                            _savePreferences();
-                          },
-                        ),
-                      ],
-                    ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 15),
-                  ),
-                ),
-              ),
-            ),
-
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : (_categorizedMode && !isSearching)
-                      ? _buildAxionCategorizedGrid(cs)
-                      : GridView.builder(
-                          controller: _drawerScrollController,
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                          physics: const BouncingScrollPhysics(
-                            parent: AlwaysScrollableScrollPhysics(),
-                          ),
-                          cacheExtent: 1500,
-                          itemCount: _filteredApps.length,
-                          gridDelegate:
-                              SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: _gridColumns,
-                            mainAxisSpacing: 18,
-                            crossAxisSpacing: 12,
-                            childAspectRatio: 0.80,
-                          ),
-                          itemBuilder: (context, index) {
-                            final app = _filteredApps[index];
-                            return RepaintBoundary(
-                              child: _buildAppIcon(
-                                app,
-                                size: 56,
-                                textColor: cs.onSurface,
-                              ),
-                            );
-                          },
-                        ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: (details) {
+        final screenHeight = MediaQuery.of(context).size.height;
+        // Dragging down anywhere on the drawer lowers its position
+        _drawerController.value += details.primaryDelta! / (screenHeight * 0.75);
+      },
+      onVerticalDragEnd: (details) {
+        final velocity = details.primaryVelocity ?? 0;
+        // Swipe down or fling down closes the drawer smoothly
+        if (velocity > 350 || _drawerController.value < 0.65) {
+          _closeDrawer();
+        } else {
+          _openDrawer();
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(top: 18),
+        decoration: BoxDecoration(
+          color: cs.surface.withOpacity(0.95),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(38)),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black54,
+              blurRadius: 28,
+              offset: Offset(0, -4),
             ),
           ],
+        ),
+        child: SafeArea(
+          top: true,
+          bottom: true,
+          child: Column(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _closeDrawer,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 14, bottom: 16),
+                  child: Center(
+                    child: Container(
+                      width: 46,
+                      height: 5.5,
+                      decoration: BoxDecoration(
+                        color: cs.onSurfaceVariant.withOpacity(0.45),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                child: Container(
+                  height: 54,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocus,
+                    onChanged: _filterApps,
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: cs.onSurface,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Search apps',
+                      hintStyle: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400,
+                        color: cs.onSurfaceVariant.withOpacity(0.75),
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        color: cs.onSurfaceVariant.withOpacity(0.8),
+                        size: 24,
+                      ),
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isSearching)
+                            IconButton(
+                              icon: const Icon(Icons.clear_rounded, size: 20),
+                              onPressed: () {
+                                _searchController.clear();
+                                _filterApps('');
+                              },
+                            ),
+                          IconButton(
+                            tooltip: _categorizedMode
+                                ? 'Switch to All Apps Grid'
+                                : 'Switch to Smart Categories',
+                            icon: Icon(
+                              _categorizedMode
+                                  ? Icons.grid_view_rounded
+                                  : Icons.folder_copy_rounded,
+                              size: 20,
+                              color: cs.onSurfaceVariant.withOpacity(0.8),
+                            ),
+                            onPressed: () {
+                              HapticFeedback.selectionClick();
+                              setState(
+                                  () => _categorizedMode = !_categorizedMode);
+                              _savePreferences();
+                            },
+                          ),
+                        ],
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                    ),
+                  ),
+                ),
+              ),
+
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : (_categorizedMode && !isSearching)
+                        ? _buildAxionCategorizedGrid(cs)
+                        : GridView.builder(
+                            controller: _drawerScrollController,
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                            physics: const BouncingScrollPhysics(
+                              parent: AlwaysScrollableScrollPhysics(),
+                            ),
+                            cacheExtent: 1500,
+                            itemCount: _filteredApps.length,
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: _gridColumns,
+                              mainAxisSpacing: 18,
+                              crossAxisSpacing: 12,
+                              childAspectRatio: 0.80,
+                            ),
+                            itemBuilder: (context, index) {
+                              final app = _filteredApps[index];
+                              return RepaintBoundary(
+                                child: _buildAppIcon(
+                                  app,
+                                    size: 56,
+                                    textColor: cs.onSurface,
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          ),
         ),
       ),
     );
