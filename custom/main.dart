@@ -1,743 +1,487 @@
-// FILE: custom/main.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' as ui;
-
-import 'package:dynamic_color/dynamic_color.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class PixelColor {
-  final String name;
-  final Color color;
-  const PixelColor(this.name, this.color);
-}
-
-const List<PixelColor> seedOptions = [
-  PixelColor('Indigo', Color(0xFF4B5C92)),
-  PixelColor('Obsidian', Color(0xFF1C1C1E)),
-  PixelColor('Porcelain', Color(0xFFF4F0EA)),
-  PixelColor('Frost', Color(0xFFD6E4F0)),
-  PixelColor('Lemongrass', Color(0xFFD8E698)),
-  PixelColor('Peony', Color(0xFFF29CB6)),
-  PixelColor('Jade', Color(0xFFA3C9A8)),
-  PixelColor('Moonstone', Color(0xFF8FA3B0)),
-];
-
-enum IconShape {
-  circle,
-  squircle,
-  roundedSquare,
-  teardrop,
-  pebble,
-  sharp,
-}
-
-const Map<IconShape, String> shapeNames = {
-  IconShape.circle: 'Circle',
-  IconShape.squircle: 'Squircle',
-  IconShape.roundedSquare: 'Rounded',
-  IconShape.teardrop: 'Teardrop',
-  IconShape.pebble: 'Pebble',
-  IconShape.sharp: 'Sharp',
-};
-
-ShapeBorder buildIconShape(IconShape shape, double size) {
-  switch (shape) {
-    case IconShape.circle:
-      return const CircleBorder();
-    case IconShape.squircle:
-      return ContinuousRectangleBorder(
-        borderRadius: BorderRadius.circular(size * 0.68),
-      );
-    case IconShape.roundedSquare:
-      return RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(size * 0.24),
-      );
-    case IconShape.teardrop:
-      return RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(size * 0.5),
-          topRight: Radius.circular(size * 0.5),
-          bottomLeft: Radius.circular(size * 0.5),
-          bottomRight: Radius.circular(size * 0.14),
-        ),
-      );
-    case IconShape.pebble:
-      return RoundedRectangleBorder(
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(size * 0.48),
-          bottomRight: Radius.circular(size * 0.48),
-          topRight: Radius.circular(size * 0.22),
-          bottomLeft: Radius.circular(size * 0.22),
-        ),
-      );
-    case IconShape.sharp:
-      return RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(size * 0.08),
-      );
-  }
-}
-
-class AppItem {
-  final String name;
-  final String pkg;
-  final Uint8List icon;
-  final MemoryImage provider;
-  AppItem({required this.name, required this.pkg, required this.icon})
-      : provider = MemoryImage(icon);
-}
-
-class LauncherState extends ChangeNotifier {
-  static const MethodChannel _ch = MethodChannel('caesiumlauncher/native');
-  SharedPreferences? _prefs;
-
-  List<AppItem> apps = [];
-  List<String> dockPkgs = [];
-  Map<int, String> homeSlots = {};
-  
-  Map<String, List<String>> categories = {
-    'Social & Chat': [],
-    'Media & Audio': [],
-    'Tools & System': [],
-    'Games': [],
-  };
-
-  bool loading = true;
-  bool amoledMode = false;
-  bool glassEffect = true;
-  bool dynamicWallpaperColor = true;
-  int seedIndex = 0;
-  int gridCols = 4;
-  int gridRows = 4;
-  bool showLabels = true;
-  IconShape iconShape = IconShape.squircle;
-
-  Future<void> init() async {
-    _prefs = await SharedPreferences.getInstance();
-    amoledMode = _prefs?.getBool('amoled') ?? false;
-    glassEffect = _prefs?.getBool('glass') ?? true;
-    dynamicWallpaperColor = _prefs?.getBool('dyn') ?? true;
-    seedIndex = (_prefs?.getInt('seed') ?? 0).clamp(0, seedOptions.length - 1);
-    gridCols = (_prefs?.getInt('cols') ?? 4).clamp(4, 5);
-    gridRows = (_prefs?.getInt('rows') ?? 4).clamp(4, 5);
-    showLabels = _prefs?.getBool('labels') ?? true;
-    final shapeIdx = (_prefs?.getInt('shape') ?? 1)
-        .clamp(0, IconShape.values.length - 1);
-    iconShape = IconShape.values[shapeIdx];
-    dockPkgs = _prefs?.getStringList('dock') ?? [];
-
-    final rawSlots = _prefs?.getStringList('home_slots') ?? [];
-    homeSlots = {};
-    for (int i = 0; i < rawSlots.length; i++) {
-      if (rawSlots[i].isNotEmpty) {
-        homeSlots[i] = rawSlots[i];
-      }
-    }
-
-    final savedCats = _prefs?.getString('categories');
-    if (savedCats != null) {
-      try {
-        final decoded = jsonDecode(savedCats) as Map;
-        categories = decoded.map((k, v) => MapEntry(k as String, List<String>.from(v as List)));
-      } catch (_) {}
-    }
-
-    notifyListeners();
-    await refreshApps();
-  }
-
-  void _saveHomeSlots() {
-    final total = gridCols * gridRows;
-    final list = List.generate(total, (i) => homeSlots[i] ?? '');
-    _prefs?.setStringList('home_slots', list);
-  }
-
-  void _saveCategories() {
-    _prefs?.setString('categories', jsonEncode(categories));
-    notifyListeners();
-  }
-
-  void assignCategory(String pkg, String category) {
-    categories.forEach((cat, list) {
-      list.remove(pkg);
-    });
-    if (category.isNotEmpty) {
-      categories[category] ??= [];
-      categories[category]!.add(pkg);
-    }
-    _saveCategories();
-  }
-
-  String getAppCategory(String pkg) {
-    for (final entry in categories.entries) {
-      if (entry.value.contains(pkg)) return entry.key;
-    }
-    return 'Uncategorized';
-  }
-
-  Future<void> refreshApps() async {
-    try {
-      final raw = await _ch.invokeMethod<List<dynamic>>('getApps');
-      if (raw != null) {
-        final loaded = <AppItem>[];
-        for (final item in raw) {
-          if (item is Map) {
-            final name = (item['name'] as String?) ?? 'App';
-            final pkg = (item['pkg'] as String?) ?? '';
-            final icon = item['icon'] as Uint8List?;
-            if (pkg.isNotEmpty && icon != null) {
-              loaded.add(AppItem(name: name, pkg: pkg, icon: icon));
-            }
-          }
-        }
-        apps = loaded;
-
-        if (dockPkgs.isEmpty && apps.isNotEmpty) {
-          final defaults = <String>[];
-          for (final a in apps) {
-            final l = a.pkg.toLowerCase();
-            if (l.contains('dialer') ||
-                l.contains('contacts') ||
-                l.contains('messaging') ||
-                l.contains('mms') ||
-                l.contains('chrome') ||
-                l.contains('browser') ||
-                l.contains('camera') ||
-                l.contains('audio_player') ||
-                l.contains('vending')) {
-              if (!defaults.contains(a.pkg)) defaults.add(a.pkg);
-            }
-            if (defaults.length >= 4) break;
-          }
-          if (defaults.length < 4) {
-            for (final a in apps) {
-              if (!defaults.contains(a.pkg)) defaults.add(a.pkg);
-              if (defaults.length >= 4) break;
-            }
-          }
-          dockPkgs = defaults;
-          _prefs?.setStringList('dock', dockPkgs);
-        }
-
-        bool catChanged = false;
-        for (final a in apps) {
-          if (getAppCategory(a.pkg) == 'Uncategorized') {
-            final l = a.pkg.toLowerCase();
-            final name = a.name.toLowerCase();
-            if (l.contains('whatsapp') || l.contains('telegram') || l.contains('discord') || l.contains('snapchat') || l.contains('message') || l.contains('twitter') || l.contains('reddit')) {
-              categories['Social & Chat'] ??= [];
-              categories['Social & Chat']!.add(a.pkg);
-              catChanged = true;
-            } else if (l.contains('spotify') || l.contains('youtube') || l.contains('music') || l.contains('audio_player') || l.contains('netflix') || l.contains('media') || l.contains('camera')) {
-              categories['Media & Audio'] ??= [];
-              categories['Media & Audio']!.add(a.pkg);
-              catChanged = true;
-            } else if (name.contains('game') || l.contains('minecraft') || l.contains('fortnite')) {
-              categories['Games'] ??= [];
-              categories['Games']!.add(a.pkg);
-              catChanged = true;
-            } else {
-              categories['Tools & System'] ??= [];
-              categories['Tools & System']!.add(a.pkg);
-              catChanged = true;
-            }
-          }
-        }
-        if (catChanged) _saveCategories();
-
-        if (homeSlots.isEmpty && apps.isNotEmpty) {
-          int slot = 0;
-          for (final a in apps) {
-            if (!dockPkgs.contains(a.pkg)) {
-              homeSlots[slot] = a.pkg;
-              slot++;
-              if (slot >= gridCols * gridRows) break;
-            }
-          }
-          _saveHomeSlots();
-        }
-      }
-    } catch (_) {}
-    loading = false;
-    notifyListeners();
-  }
-
-  List<AppItem> get dockApps {
-    final map = {for (final a in apps) a.pkg: a};
-    return [
-      for (final p in dockPkgs)
-        if (map[p] != null) map[p]!
-    ];
-  }
-
-  void toggleDock(String pkg) {
-    if (dockPkgs.contains(pkg)) {
-      dockPkgs.remove(pkg);
-    } else {
-      if (dockPkgs.length >= 5) dockPkgs.removeLast();
-      dockPkgs.add(pkg);
-    }
-    _prefs?.setStringList('dock', dockPkgs);
-    notifyListeners();
-  }
-
-  void moveHomeSlot(int fromIndex, int toIndex) {
-    final appPkg = homeSlots[fromIndex];
-    final targetPkg = homeSlots[toIndex];
-
-    if (appPkg != null) {
-      homeSlots[toIndex] = appPkg;
-      if (targetPkg != null) {
-        homeSlots[fromIndex] = targetPkg;
-      } else {
-        homeSlots.remove(fromIndex);
-      }
-      _saveHomeSlots();
-      notifyListeners();
-    }
-  }
-
-  void addOrMoveToHome(String pkg) {
-    if (homeSlots.containsValue(pkg)) return;
-    for (int i = 0; i < gridCols * gridRows; i++) {
-      if (!homeSlots.containsKey(i)) {
-        homeSlots[i] = pkg;
-        _saveHomeSlots();
-        notifyListeners();
-        break;
-      }
-    }
-  }
-
-  void removeFromHome(String pkg) {
-    homeSlots.removeWhere((k, v) => v == pkg);
-    _saveHomeSlots();
-    notifyListeners();
-  }
-
-  void setIconShape(IconShape s) {
-    iconShape = s;
-    _prefs?.setInt('shape', s.index);
-    notifyListeners();
-  }
-
-  void setAmoled(bool v) {
-    amoledMode = v;
-    _prefs?.setBool('amoled', v);
-    notifyListeners();
-  }
-
-  void setGlass(bool v) {
-    glassEffect = v;
-    _prefs?.setBool('glass', v);
-    notifyListeners();
-  }
-
-  void setDynamicColor(bool v) {
-    dynamicWallpaperColor = v;
-    _prefs?.setBool('dyn', v);
-    notifyListeners();
-  }
-
-  void setSeed(int i) {
-    seedIndex = i;
-    dynamicWallpaperColor = false;
-    _prefs?.setInt('seed', i);
-    _prefs?.setBool('dyn', false);
-    notifyListeners();
-  }
-
-  void setGridSize(int cols, int rows) {
-    gridCols = cols;
-    gridRows = rows;
-    _prefs?.setInt('cols', cols);
-    _prefs?.setInt('rows', rows);
-    notifyListeners();
-  }
-
-  void setShowLabels(bool v) {
-    showLabels = v;
-    _prefs?.setBool('labels', v);
-    notifyListeners();
-  }
-
-  Future<void> launch(String pkg) async {
-    HapticFeedback.lightImpact();
-    await _ch.invokeMethod('launchApp', {'pkg': pkg});
-  }
-
-  Future<void> openAppInfo(String pkg) async {
-    await _ch.invokeMethod('appInfo', {'pkg': pkg});
-  }
-
-  Future<void> uninstall(String pkg) async {
-    await _ch.invokeMethod('uninstallApp', {'pkg': pkg});
-    Future.delayed(const Duration(seconds: 3), refreshApps);
-  }
-
-  Future<void> openHomeSettings() async {
-    await _ch.invokeMethod('openDefaultSettings');
-  }
-
-  Future<void> pickWallpaper() async {
-    await _ch.invokeMethod('pickWallpaper');
-  }
-
-  Future<void> searchWeb(String query) async {
-    final url =
-        'https://www.google.com/search?q=${Uri.encodeComponent(query.trim())}';
-    await _ch.invokeMethod('openUrl', {'url': url});
-  }
-}
-
-final LauncherState state = LauncherState();
-
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  PaintingBinding.instance.imageCache.maximumSize = 1000;
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 250 << 20;
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     systemNavigationBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-    systemNavigationBarIconBrightness: Brightness.light,
+    systemNavigationBarContrastEnforced: false,
   ));
-  await state.init();
   runApp(const CaesiumLauncherApp());
+}
+
+class AppModel {
+  final String name;
+  final String pkg;
+  final Uint8List iconBytes;
+  final MemoryImage imageProvider;
+  final String category;
+
+  AppModel({
+    required this.name,
+    required this.pkg,
+    required this.iconBytes,
+    required this.category,
+  }) : imageProvider = MemoryImage(iconBytes);
+
+  static String categorize(String name, String pkg) {
+    final lowerPkg = pkg.toLowerCase();
+    final lowerName = name.toLowerCase();
+    if (lowerPkg.contains('social') ||
+        lowerPkg.contains('discord') ||
+        lowerPkg.contains('telegram') ||
+        lowerPkg.contains('snapchat') ||
+        lowerPkg.contains('instagram') ||
+        lowerPkg.contains('whatsapp') ||
+        lowerPkg.contains('messaging') ||
+        lowerPkg.contains('dialer')) {
+      return 'Social & Comm';
+    }
+    if (lowerPkg.contains('music') ||
+        lowerPkg.contains('audio') ||
+        lowerPkg.contains('spotify') ||
+        lowerPkg.contains('youtube') ||
+        lowerPkg.contains('video') ||
+        lowerPkg.contains('camera') ||
+        lowerPkg.contains('gallery') ||
+        lowerPkg.contains('photos')) {
+      return 'Media';
+    }
+    if (lowerPkg.contains('game') ||
+        lowerPkg.contains('minecraft') ||
+        lowerPkg.contains('fortnite') ||
+        lowerPkg.contains('roblox')) {
+      return 'Games';
+    }
+    if (lowerPkg.contains('settings') ||
+        lowerPkg.contains('system') ||
+        lowerPkg.contains('android') ||
+        lowerPkg.contains('google') ||
+        lowerPkg.contains('calculator') ||
+        lowerPkg.contains('clock') ||
+        lowerPkg.contains('files') ||
+        lowerName.contains('caesium')) {
+      return 'System & Tools';
+    }
+    return 'Other Apps';
+  }
 }
 
 class CaesiumLauncherApp extends StatelessWidget {
   const CaesiumLauncherApp({super.key});
 
+  static final _defaultLightScheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF4F6373),
+    brightness: Brightness.light,
+  );
+
+  static final _defaultDarkScheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF8AB4F8),
+    brightness: Brightness.dark,
+  );
+
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: state,
-      builder: (context, _) {
-        return DynamicColorBuilder(
-          builder: (lightDyn, darkDyn) {
-            final seed = (state.dynamicWallpaperColor && darkDyn != null)
-                ? darkDyn.primary
-                : seedOptions[state.seedIndex].color;
-            final scheme = ColorScheme.fromSeed(
-              seedColor: seed,
-              brightness: Brightness.dark,
-            );
-            return MaterialApp(
-              title: 'Caesium Launcher',
-              debugShowCheckedModeBanner: false,
-              theme: ThemeData(
-                useMaterial3: true,
-                colorScheme: scheme,
-                scaffoldBackgroundColor: Colors.transparent,
-              ),
-              home: const LauncherShell(),
-            );
-          },
+    return DynamicColorBuilder(
+      builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
+        final lightScheme = lightDynamic?.harmonized() ?? _defaultLightScheme;
+        final darkScheme = darkDynamic?.harmonized() ?? _defaultDarkScheme;
+
+        return MaterialApp(
+          title: 'Caesium Launcher',
+          debugShowCheckedModeBanner: false,
+          themeMode: ThemeMode.system,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: lightScheme,
+            scaffoldBackgroundColor: Colors.transparent,
+          ),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            colorScheme: darkScheme,
+            scaffoldBackgroundColor: Colors.transparent,
+          ),
+          home: const LauncherHome(),
         );
       },
     );
   }
 }
 
-class AppIconTile extends StatelessWidget {
-  final AppItem app;
-  final IconShape shape;
-  final bool showLabel;
-  final double size;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
-
-  const AppIconTile({
-    super.key,
-    required this.app,
-    required this.shape,
-    required this.showLabel,
-    required this.size,
-    required this.onTap,
-    required this.onLongPress,
-  });
+class LauncherHome extends StatefulWidget {
+  const LauncherHome({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: GestureDetector(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        behavior: HitTestBehavior.opaque,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            PhysicalShape(
-              clipper: ShapeBorderClipper(shape: buildIconShape(shape, size)),
-              clipBehavior: Clip.antiAlias,
-              color: Colors.transparent,
-              child: SizedBox(
-                width: size,
-                height: size,
-                child: Image(
-                  image: app.provider,
-                  width: size,
-                  height: size,
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  filterQuality: FilterQuality.none,
-                ),
-              ),
-            ),
-            if (showLabel) ...[
-              const SizedBox(height: 6),
-              Text(
-                app.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  shadows: [Shadow(color: Colors.black87, blurRadius: 4)],
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+  State<LauncherHome> createState() => _LauncherHomeState();
 }
 
-class LauncherShell extends StatefulWidget {
-  const LauncherShell({super.key});
+class _LauncherHomeState extends State<LauncherHome>
+    with SingleTickerProviderStateMixin {
+  static const MethodChannel _channel = MethodChannel('caesiumlauncher/native');
 
-  @override
-  State<LauncherShell> createState() => _LauncherShellState();
-}
+  List<AppModel> _allApps = [];
+  List<AppModel> _filteredApps = [];
+  List<String> _dockPackages = [];
+  List<String> _homeGridPackages = [];
 
-class _LauncherShellState extends State<LauncherShell>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  late final AnimationController _drawerCtrl;
-  late final Animation<Offset> _drawerOffset;
+  bool _isLoading = true;
+  bool _categorizedMode = false;
+  bool _themedIcons = false;
+  int _gridColumns = 4;
+  String _iconShape = 'circle'; // circle, squircle, rounded, teardrop
 
-  final ScrollController _gridScrollCtrl = ScrollController();
-  final TextEditingController _searchCtrl = TextEditingController();
-  String _query = '';
+  late AnimationController _drawerController;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+  final ScrollController _drawerScrollController = ScrollController();
+
   late Timer _clockTimer;
   DateTime _now = DateTime.now();
-  bool _precached = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-
-    _drawerCtrl = AnimationController(
+    _drawerController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 180),
+      duration: const Duration(milliseconds: 280),
     );
-
-    _drawerOffset = Tween<Offset>(
-      begin: const Offset(0, 1.0),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _drawerCtrl,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    ));
-
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
-    state.addListener(_precacheIconsIfNeeded);
-  }
-
-  void _precacheIconsIfNeeded() {
-    if (!_precached && state.apps.isNotEmpty && mounted) {
-      _precached = true;
-      for (final a in state.apps) {
-        precacheImage(a.provider, context);
-      }
-    }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _precacheIconsIfNeeded();
+    _loadPreferences();
+    _fetchApps();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    state.removeListener(_precacheIconsIfNeeded);
+    _drawerController.dispose();
+    _searchController.dispose();
+    _searchFocus.dispose();
+    _drawerScrollController.dispose();
     _clockTimer.cancel();
-    _drawerCtrl.dispose();
-    _gridScrollCtrl.dispose();
-    _searchCtrl.dispose();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState s) {
-    if (s == AppLifecycleState.resumed) {
-      state.refreshApps();
-      if (mounted) setState(() => _now = DateTime.now());
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _dockPackages = prefs.getStringList('dock_pkgs') ?? [];
+      _homeGridPackages = prefs.getStringList('home_grid_pkgs') ?? [];
+      _categorizedMode = prefs.getBool('categorized_mode') ?? false;
+      _themedIcons = prefs.getBool('themed_icons') ?? false;
+      _gridColumns = prefs.getInt('grid_columns') ?? 4;
+      _iconShape = prefs.getString('icon_shape') ?? 'circle';
+    });
+  }
+
+  Future<void> _savePreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('dock_pkgs', _dockPackages);
+    await prefs.setStringList('home_grid_pkgs', _homeGridPackages);
+    await prefs.setBool('categorized_mode', _categorizedMode);
+    await prefs.setBool('themed_icons', _themedIcons);
+    await prefs.setInt('grid_columns', _gridColumns);
+    await prefs.setString('icon_shape', _iconShape);
+  }
+
+  Future<void> _fetchApps() async {
+    try {
+      final List<dynamic>? rawApps = await _channel.invokeMethod('getApps');
+      if (rawApps != null) {
+        final List<AppModel> parsed = [];
+        for (final item in rawApps) {
+          final map = Map<String, dynamic>.from(item);
+          final String name = map['name'] ?? 'App';
+          final String pkg = map['pkg'] ?? '';
+          final Uint8List icon = map['icon'] is Uint8List
+              ? map['icon']
+              : Uint8List.fromList(List<int>.from(map['icon']));
+
+          final model = AppModel(
+            name: name,
+            pkg: pkg,
+            iconBytes: icon,
+            category: AppModel.categorize(name, pkg),
+          );
+          parsed.add(model);
+        }
+
+        if (mounted) {
+          // Pre-cache all icons into GPU memory immediately to eliminate scroll stutter
+          for (final app in parsed) {
+            precacheImage(app.imageProvider, context);
+          }
+
+          setState(() {
+            _allApps = parsed;
+            _filteredApps = parsed;
+            _isLoading = false;
+
+            if (_dockPackages.isEmpty && parsed.isNotEmpty) {
+              _dockPackages = parsed.take(4).map((e) => e.pkg).toList();
+            }
+            if (_homeGridPackages.isEmpty && parsed.length > 4) {
+              _homeGridPackages =
+                  parsed.skip(4).take(8).map((e) => e.pkg).toList();
+            }
+          });
+          _savePreferences();
+        }
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  void _filterApps(String query) {
+    if (query.trim().isEmpty) {
+      setState(() => _filteredApps = _allApps);
+    } else {
+      final q = query.toLowerCase();
+      setState(() {
+        _filteredApps = _allApps
+            .where((a) =>
+                a.name.toLowerCase().contains(q) ||
+                a.pkg.toLowerCase().contains(q))
+            .toList();
+      });
     }
   }
 
   void _openDrawer() {
-    HapticFeedback.selectionClick();
-    _drawerCtrl.forward();
+    HapticFeedback.lightImpact();
+    _drawerController.fling(velocity: 2.2);
   }
 
   void _closeDrawer() {
-    FocusScope.of(context).unfocus();
-    _drawerCtrl.reverse();
+    _searchFocus.unfocus();
+    _searchController.clear();
+    _filterApps('');
+    if (_drawerScrollController.hasClients) {
+      _drawerScrollController.jumpTo(0);
+    }
+    _drawerController.fling(velocity: -2.2);
   }
 
-  void _onVerticalDragUpdate(DragUpdateDetails d, double height) {
-    _drawerCtrl.value -= d.primaryDelta! / height;
+  Future<void> _launchApp(String pkg) async {
+    HapticFeedback.selectionClick();
+    await _channel.invokeMethod('launchApp', {'pkg': pkg});
   }
 
-  void _onVerticalDragEnd(DragEndDetails d) {
-    final v = d.primaryVelocity ?? 0.0;
-    if (v < -200) {
-      _drawerCtrl.forward();
-    } else if (v > 200) {
-      _closeDrawer();
-    } else if (_drawerCtrl.value > 0.35) {
-      _drawerCtrl.forward();
-    } else {
-      _closeDrawer();
+  ShapeBorder _getShapeBorder() {
+    switch (_iconShape) {
+      case 'squircle':
+        return ContinuousRectangleBorder(
+            borderRadius: BorderRadius.circular(34));
+      case 'rounded':
+        return RoundedRectangleBorder(borderRadius: BorderRadius.circular(16));
+      case 'teardrop':
+        return const RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(28),
+            topRight: Radius.circular(28),
+            bottomLeft: Radius.circular(28),
+            bottomRight: Radius.circular(8),
+          ),
+        );
+      case 'circle':
+      default:
+        return const CircleBorder();
     }
   }
 
-  void _showAppMenu(AppItem app) {
-    HapticFeedback.mediumImpact();
-    final inDock = state.dockPkgs.contains(app.pkg);
-    final inHome = state.homeSlots.containsValue(app.pkg);
-    final currentCat = state.getAppCategory(app.pkg);
+  Widget _buildAppIcon(AppModel app,
+      {double size = 58, bool showLabel = true, Color? textColor}) {
     final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: () => _launchApp(app.pkg),
+      onLongPress: () => _showAppOptionsSheet(app),
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: size,
+            height: size,
+            decoration: ShapeDecoration(
+              shape: _getShapeBorder(),
+              color: _themedIcons
+                  ? cs.secondaryContainer
+                  : cs.surfaceContainerHighest.withOpacity(0.35),
+              shadows: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.14),
+                  blurRadius: 6,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ColorFiltered(
+              colorFilter: _themedIcons
+                  ? ColorFilter.mode(cs.onSecondaryContainer, BlendMode.modulate)
+                  : const ColorFilter.mode(
+                      Colors.transparent, BlendMode.dst),
+              child: Image(
+                image: app.imageProvider,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                filterQuality: FilterQuality.medium,
+              ),
+            ),
+          ),
+          if (showLabel) ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                app.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: textColor ?? Colors.white,
+                  shadows: textColor == null
+                      ? const [
+                          Shadow(
+                            color: Colors.black87,
+                            blurRadius: 4,
+                            offset: Offset(0, 1),
+                          )
+                        ]
+                      : null,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
-    showModalBottomSheet<void>(
+  void _showAppOptionsSheet(AppModel app) {
+    HapticFeedback.mediumImpact();
+    final cs = Theme.of(context).colorScheme;
+    final isPinnedHome = _homeGridPackages.contains(app.pkg);
+    final isPinnedDock = _dockPackages.contains(app.pkg);
+
+    showModalBottomSheet(
       context: context,
-      backgroundColor: cs.surfaceContainerHighest,
-      showDragHandle: true,
+      backgroundColor: cs.surfaceContainerLow,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ListTile(
-                  leading: PhysicalShape(
-                    clipper: ShapeBorderClipper(
-                        shape: buildIconShape(state.iconShape, 44)),
-                    clipBehavior: Clip.antiAlias,
-                    color: Colors.transparent,
-                    child: Image(image: app.provider, width: 44, height: 44),
-                  ),
-                  title: Text(
-                    app.name,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                      color: cs.onSurface,
-                    ),
-                  ),
-                  subtitle: Text(
-                    'Category: $currentCat',
-                    style: TextStyle(color: cs.primary, fontSize: 13, fontWeight: FontWeight.w500),
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: cs.onSurfaceVariant.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                const Divider(height: 24),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('Move to Category:', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                const SizedBox(height: 16),
+                Row(
                   children: [
-                    for (final catName in state.categories.keys)
-                      ActionChip(
-                        label: Text(catName),
-                        backgroundColor: currentCat == catName ? cs.primaryContainer : const Color(0xFF1E1E24),
-                        labelStyle: TextStyle(color: currentCat == catName ? cs.onPrimaryContainer : Colors.white, fontSize: 12),
-                        onPressed: () {
-                          state.assignCategory(app.pkg, catName);
-                          Navigator.pop(ctx);
-                        },
+                    _buildAppIcon(app, size: 48, showLabel: false),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            app.name,
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: cs.onSurface,
+                            ),
+                          ),
+                          Text(
+                            app.pkg,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
-                const Divider(height: 24),
+                const SizedBox(height: 16),
+                const Divider(),
                 ListTile(
                   leading: Icon(
-                    inHome ? Icons.star_rounded : Icons.star_border_rounded,
+                    isPinnedHome
+                        ? Icons.remove_circle_outline
+                        : Icons.add_to_home_screen_rounded,
                     color: cs.primary,
                   ),
                   title: Text(
-                    inHome ? 'Remove from Home Screen' : 'Pin to Home Screen',
-                    style: TextStyle(color: cs.onSurface),
-                  ),
+                      isPinnedHome ? 'Remove from Home Screen' : 'Add to Home Screen'),
                   onTap: () {
+                    setState(() {
+                      if (isPinnedHome) {
+                        _homeGridPackages.remove(app.pkg);
+                      } else {
+                        _homeGridPackages.add(app.pkg);
+                      }
+                    });
+                    _savePreferences();
                     Navigator.pop(ctx);
-                    if (inHome) {
-                      state.removeFromHome(app.pkg);
-                    } else {
-                      state.addOrMoveToHome(app.pkg);
-                    }
                   },
                 ),
                 ListTile(
                   leading: Icon(
-                    inDock
-                        ? Icons.remove_circle_outline_rounded
-                        : Icons.dock_rounded,
+                    isPinnedDock ? Icons.dock_outlined : Icons.dock_rounded,
                     color: cs.primary,
                   ),
-                  title: Text(
-                    inDock ? 'Remove from Bottom Dock' : 'Pin to Bottom Dock',
-                    style: TextStyle(color: cs.onSurface),
-                  ),
+                  title: Text(isPinnedDock ? 'Remove from Dock' : 'Pin to Dock (Max 5)'),
                   onTap: () {
+                    setState(() {
+                      if (isPinnedDock) {
+                        _dockPackages.remove(app.pkg);
+                      } else if (_dockPackages.length < 5) {
+                        _dockPackages.add(app.pkg);
+                      }
+                    });
+                    _savePreferences();
                     Navigator.pop(ctx);
-                    state.toggleDock(app.pkg);
                   },
                 ),
                 ListTile(
-                  leading: Icon(Icons.info_outline_rounded,
-                      color: cs.onSurfaceVariant),
-                  title: Text('App Info',
-                      style: TextStyle(color: cs.onSurface)),
+                  leading: Icon(Icons.info_outline_rounded, color: cs.secondary),
+                  title: const Text('App Info'),
                   onTap: () {
                     Navigator.pop(ctx);
-                    state.openAppInfo(app.pkg);
+                    _channel.invokeMethod('appInfo', {'pkg': app.pkg});
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.delete_outline_rounded,
-                      color: Color(0xFFFF5252)),
-                  title: const Text('Uninstall App',
-                      style: TextStyle(color: Color(0xFFFF5252))),
+                  leading: Icon(Icons.delete_outline_rounded, color: cs.error),
+                  title: const Text('Uninstall'),
                   onTap: () {
                     Navigator.pop(ctx);
-                    state.uninstall(app.pkg);
+                    _channel.invokeMethod('uninstallApp', {'pkg': app.pkg});
                   },
                 ),
               ],
@@ -748,235 +492,380 @@ class _LauncherShellState extends State<LauncherShell>
     );
   }
 
-  void _openLauncherSettings() {
+  void _showLauncherSettings() {
     HapticFeedback.mediumImpact();
-    showModalBottomSheet<void>(
+    final cs = Theme.of(context).colorScheme;
+
+    showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF141418),
-      showDragHandle: true,
+      backgroundColor: cs.surfaceContainerLow,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => const LauncherSettingsSheet(),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: cs.onSurfaceVariant.withOpacity(0.4),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Caesium Settings',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Icon Shape',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: cs.primary,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final shape in [
+                          ('circle', 'Circle'),
+                          ('squircle', 'Squircle'),
+                          ('rounded', 'Rounded'),
+                          ('teardrop', 'Teardrop'),
+                        ])
+                          ChoiceChip(
+                            label: Text(shape.$2),
+                            selected: _iconShape == shape.$1,
+                            onSelected: (_) {
+                              setState(() => _iconShape = shape.$1);
+                              setSheetState(() {});
+                              _savePreferences();
+                            },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Material You Themed Icons'),
+                      subtitle: const Text('Tint icons with dynamic wallpaper colors'),
+                      value: _themedIcons,
+                      onChanged: (val) {
+                        setState(() => _themedIcons = val);
+                        setSheetState(() {});
+                        _savePreferences();
+                      },
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Categorized App Drawer'),
+                      subtitle: const Text('Group apps into smart folders'),
+                      value: _categorizedMode,
+                      onChanged: (val) {
+                        setState(() => _categorizedMode = val);
+                        setSheetState(() {});
+                        _savePreferences();
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Grid Columns'),
+                        SegmentedButton<int>(
+                          segments: const [
+                            ButtonSegment(value: 4, label: Text('4x')),
+                            ButtonSegment(value: 5, label: Text('5x')),
+                          ],
+                          selected: {_gridColumns},
+                          onSelectionChanged: (s) {
+                            setState(() => _gridColumns = s.first);
+                            setSheetState(() {});
+                            _savePreferences();
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton.tonalIcon(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _channel.invokeMethod('pickWallpaper');
+                            },
+                            icon: const Icon(Icons.wallpaper_rounded),
+                            label: const Text('Wallpaper'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton.tonalIcon(
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _channel.invokeMethod('openDefaultSettings');
+                            },
+                            icon: const Icon(Icons.home_outlined),
+                            label: const Text('Default Home'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
-  String _formatTime(DateTime dt) {
-    final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
-
-  String _formatDate(DateTime dt) {
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  String _formattedDate() {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
-    final d = days[(dt.weekday - 1).clamp(0, 6)];
-    final m = months[(dt.month - 1).clamp(0, 11)];
-    return '$d, $m ${dt.day}';
+    final d = days[_now.weekday - 1];
+    final m = months[_now.month - 1];
+    return '$d, $m ${_now.day}';
   }
 
-  Widget _buildGlassBox({
-    required Widget child,
-    double radius = 32,
-    EdgeInsets padding = const EdgeInsets.all(16),
-  }) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: state.amoledMode
-            ? const Color(0xFF121216)
-            : Colors.black.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 18,
-            offset: Offset(0, 8),
-          ),
-        ],
-      ),
-      child: child,
-    );
+  String _formattedTime() {
+    final hour = _now.hour % 12 == 0 ? 12 : _now.hour % 12;
+    final min = _now.minute.toString().padLeft(2, '0');
+    return '$hour:$min';
   }
 
-  Widget _buildHomePage(BuildContext context, double screenHeight) {
-    final cs = Theme.of(context).colorScheme;
-    final dockApps = state.dockApps;
-    final totalSlots = state.gridCols * state.gridRows;
-    final appMap = {for (final a in state.apps) a.pkg: a};
+  Widget _buildHomeScreen(ColorScheme cs) {
+    final homeApps = _homeGridPackages
+        .map((pkg) => _allApps.where((a) => a.pkg == pkg).firstOrNull)
+        .whereType<AppModel>()
+        .toList();
+
+    final dockApps = _dockPackages
+        .map((pkg) => _allApps.where((a) => a.pkg == pkg).firstOrNull)
+        .whereType<AppModel>()
+        .toList();
 
     return GestureDetector(
-      onLongPress: _openLauncherSettings,
-      onVerticalDragUpdate: (d) => _onVerticalDragUpdate(d, screenHeight),
-      onVerticalDragEnd: _onVerticalDragEnd,
       behavior: HitTestBehavior.translucent,
+      onLongPress: _showLauncherSettings,
+      onVerticalDragUpdate: (details) {
+        final screenHeight = MediaQuery.of(context).size.height;
+        _drawerController.value -= details.primaryDelta! / (screenHeight * 0.75);
+      },
+      onVerticalDragEnd: (details) {
+        final velocity = details.primaryVelocity ?? 0;
+        if (velocity < -350 || _drawerController.value > 0.35) {
+          _openDrawer();
+        } else {
+          _closeDrawer();
+        }
+      },
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Pixel At-a-Glance & Material You Clock Pill
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(
-                    child: _buildGlassBox(
-                      radius: 30,
-                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _formatDate(_now).toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.white60,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 1.4,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                _formatTime(_now),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 38,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -1,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const Icon(Icons.cloud_queue_rounded, color: Colors.white70, size: 34),
-                        ],
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _formattedDate(),
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 8,
+                              offset: Offset(0, 2),
+                            )
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Caesium Material You',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white.withOpacity(0.85),
+                          shadows: const [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 6,
+                              offset: Offset(0, 1),
+                            )
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer.withOpacity(0.92),
+                      borderRadius: BorderRadius.circular(28),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.18),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      _formattedTime(),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: cs.onPrimaryContainer,
+                        letterSpacing: -0.5,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 14),
-                  IconButton(
-                    onPressed: _openLauncherSettings,
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.black.withValues(alpha: 0.35),
-                      padding: const EdgeInsets.all(16),
-                    ),
-                    icon: const Icon(Icons.settings_rounded, color: Colors.white, size: 22),
-                    tooltip: 'Settings',
-                  ),
                 ],
               ),
-              const Spacer(),
+              const SizedBox(height: 28),
 
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(bottom: 16),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: state.gridCols,
-                  mainAxisSpacing: 20,
-                  crossAxisSpacing: 18,
-                  childAspectRatio: 0.78,
+              // Home Screen Pinned Apps Grid
+              Expanded(
+                child: GridView.builder(
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: homeApps.length,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: _gridColumns,
+                    mainAxisSpacing: 18,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 0.82,
+                  ),
+                  itemBuilder: (context, index) {
+                    return RepaintBoundary(
+                      child: _buildAppIcon(homeApps[index], size: 58),
+                    );
+                  },
                 ),
-                itemCount: totalSlots,
-                itemBuilder: (ctx, slotIndex) {
-                  final pkg = state.homeSlots[slotIndex];
-                  final app = pkg != null ? appMap[pkg] : null;
-
-                  return DragTarget<int>(
-                    onWillAcceptWithDetails: (details) => true,
-                    onAcceptWithDetails: (details) {
-                      HapticFeedback.mediumImpact();
-                      state.moveHomeSlot(details.data, slotIndex);
-                    },
-                    builder: (context, candidateData, rejectedData) {
-                      if (app == null) {
-                        return Container(
-                          decoration: BoxDecoration(
-                            color: candidateData.isNotEmpty
-                                ? Colors.white.withValues(alpha: 0.2)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(22),
-                            border: candidateData.isNotEmpty
-                                ? Border.all(color: cs.primary, width: 2)
-                                : null,
-                          ),
-                        );
-                      }
-                      return LongPressDraggable<int>(
-                        data: slotIndex,
-                        feedback: Material(
-                          color: Colors.transparent,
-                          child: Opacity(
-                            opacity: 0.9,
-                            child: AppIconTile(
-                              app: app,
-                              shape: state.iconShape,
-                              showLabel: state.showLabels,
-                              size: 62,
-                              onTap: () {},
-                              onLongPress: () {},
-                            ),
-                          ),
-                        ),
-                        childWhenDragging: Opacity(
-                          opacity: 0.25,
-                          child: AppIconTile(
-                            app: app,
-                            shape: state.iconShape,
-                            showLabel: state.showLabels,
-                            size: 60,
-                            onTap: () {},
-                            onLongPress: () {},
-                          ),
-                        ),
-                        child: AppIconTile(
-                          app: app,
-                          shape: state.iconShape,
-                          showLabel: state.showLabels,
-                          size: 60,
-                          onTap: () => state.launch(app.pkg),
-                          onLongPress: () => _showAppMenu(app),
-                        ),
-                      );
-                    },
-                  );
-                },
               ),
 
-              _buildGlassBox(
-                radius: 40,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              // Bottom Search Pill (Pixel Launcher Style)
+              GestureDetector(
+                onTap: () {
+                  _openDrawer();
+                  Future.delayed(const Duration(milliseconds: 220), () {
+                    if (mounted) _searchFocus.requestFocus();
+                  });
+                },
+                child: Container(
+                  height: 52,
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  decoration: BoxDecoration(
+                    color: cs.surfaceContainerHigh.withOpacity(0.94),
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.search_rounded, color: cs.primary, size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Search apps or web...',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.tune_rounded,
+                            color: cs.onSurfaceVariant, size: 22),
+                        onPressed: _showLauncherSettings,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Floating Material You Tonal Dock
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainer.withOpacity(0.88),
+                  borderRadius: BorderRadius.circular(32),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.22),
+                      blurRadius: 14,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     for (final app in dockApps)
-                      AppIconTile(
-                        app: app,
-                        shape: state.iconShape,
-                        showLabel: false,
-                        size: 58,
-                        onTap: () => state.launch(app.pkg),
-                        onLongPress: () => _showAppMenu(app),
+                      RepaintBoundary(
+                        child: _buildAppIcon(app, size: 54, showLabel: false),
                       ),
-                    if (dockApps.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Text(
-                          'Pin apps to dock',
-                          style: TextStyle(color: Colors.white60, fontSize: 12),
+                    // All Apps Drawer Button
+                    GestureDetector(
+                      onTap: _openDrawer,
+                      child: Container(
+                        width: 54,
+                        height: 54,
+                        decoration: ShapeDecoration(
+                          shape: _getShapeBorder(),
+                          color: cs.primaryContainer,
+                        ),
+                        child: Icon(
+                          Icons.apps_rounded,
+                          color: cs.onPrimaryContainer,
+                          size: 26,
                         ),
                       ),
+                    ),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
             ],
           ),
         ),
@@ -984,208 +873,171 @@ class _LauncherShellState extends State<LauncherShell>
     );
   }
 
-  Widget _buildAppDrawer(BuildContext context, double screenHeight) {
-    final cs = Theme.of(context).colorScheme;
-    final q = _query.trim().toLowerCase();
-    final appMap = {for (final a in state.apps) a.pkg: a};
-    final isSearching = q.isNotEmpty;
-    final searchFiltered = state.apps.where((a) {
-      return a.name.toLowerCase().contains(q) || a.pkg.toLowerCase().contains(q);
-    }).toList();
-
+  Widget _buildDrawerSheet(ColorScheme cs) {
     return Container(
-      color: state.amoledMode ? Colors.black : const Color(0xFF101014),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black45,
+            blurRadius: 24,
+            offset: Offset(0, -4),
+          ),
+        ],
+      ),
       child: SafeArea(
+        bottom: true,
         child: Column(
           children: [
-            Expanded(
-              child: state.loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : NotificationListener<ScrollNotification>(
-                      onNotification: (n) {
-                        if (n is OverscrollNotification &&
-                            n.overscroll < -8 &&
-                            _gridScrollCtrl.offset <= 0) {
-                          _closeDrawer();
-                          return true;
-                        }
-                        return false;
-                      },
-                      child: ListView(
-                        controller: _gridScrollCtrl,
-                        physics: const BouncingScrollPhysics(
-                            parent: AlwaysScrollableScrollPhysics()),
-                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-                        children: [
-                          if (isSearching) ...[
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Text('Search Results (${searchFiltered.length})',
-                                  style: TextStyle(color: cs.primary, fontWeight: FontWeight.bold, fontSize: 15)),
-                            ),
-                            GridView.builder(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: state.gridCols,
-                                mainAxisSpacing: 18,
-                                crossAxisSpacing: 12,
-                                childAspectRatio: 0.78,
-                              ),
-                              itemCount: searchFiltered.length,
-                              itemBuilder: (ctx, i) {
-                                final app = searchFiltered[i];
-                                return AppIconTile(
-                                  key: ValueKey(app.pkg),
-                                  app: app,
-                                  shape: state.iconShape,
-                                  showLabel: state.showLabels,
-                                  size: 56,
-                                  onTap: () => state.launch(app.pkg),
-                                  onLongPress: () => _showAppMenu(app),
-                                );
-                              },
-                            ),
-                          ] else ...[
-                            for (final entry in state.categories.entries)
-                              if (entry.value.isNotEmpty) ...[
-                                Container(
-                                  margin: const EdgeInsets.only(bottom: 20),
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF18181E),
-                                    borderRadius: BorderRadius.circular(26),
-                                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Icon(Icons.folder_rounded, color: cs.primary, size: 20),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            entry.key,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          const Spacer(),
-                                          Text(
-                                            '${entry.value.length}',
-                                            style: const TextStyle(color: Colors.white54, fontSize: 13),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 14),
-                                      GridView.builder(
-                                        shrinkWrap: true,
-                                        physics: const NeverScrollableScrollPhysics(),
-                                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                          crossAxisCount: state.gridCols,
-                                          mainAxisSpacing: 16,
-                                          crossAxisSpacing: 12,
-                                          childAspectRatio: 0.78,
-                                        ),
-                                        itemCount: entry.value.length,
-                                        itemBuilder: (ctx, idx) {
-                                          final pkg = entry.value[idx];
-                                          final app = appMap[pkg];
-                                          if (app == null) return const SizedBox.shrink();
-                                          return AppIconTile(
-                                            key: ValueKey(app.pkg),
-                                            app: app,
-                                            shape: state.iconShape,
-                                            showLabel: state.showLabels,
-                                            size: 54,
-                                            onTap: () => state.launch(app.pkg),
-                                            onLongPress: () => _showAppMenu(app),
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                          ],
-                        ],
-                      ),
+            // Drag Handle & Header
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragUpdate: (details) {
+                final screenHeight = MediaQuery.of(context).size.height;
+                _drawerController.value -=
+                    details.primaryDelta! / (screenHeight * 0.75);
+              },
+              onVerticalDragEnd: (details) {
+                final velocity = details.primaryVelocity ?? 0;
+                if (velocity > 350 || _drawerController.value < 0.65) {
+                  _closeDrawer();
+                } else {
+                  _openDrawer();
+                }
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 8),
+                child: Center(
+                  child: Container(
+                    width: 42,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: cs.onSurfaceVariant.withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(3),
                     ),
-            ),
-
-            if (isSearching && searchFiltered.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: FilledButton.icon(
-                  onPressed: () => state.searchWeb(_query),
-                  icon: const Icon(Icons.travel_explore_rounded),
-                  label: Text('Search Google for "$_query"'),
+                  ),
                 ),
               ),
+            ),
 
-            GestureDetector(
-              onVerticalDragUpdate: (d) =>
-                  _onVerticalDragUpdate(d, screenHeight),
-              onVerticalDragEnd: _onVerticalDragEnd,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF1A1A20),
-                  border: Border(
-                      top: BorderSide(color: Colors.white10)),
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                          color: Colors.white, size: 30),
-                      tooltip: 'Back to Home',
-                      onPressed: _closeDrawer,
+            // Category / All Apps Toggle Bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'All Apps (${_filteredApps.length})',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: cs.onSurface,
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchCtrl,
-                        onChanged: (v) => setState(() => _query = v),
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText:
-                              'Search ${state.apps.length} apps in categories...',
-                          hintStyle: const TextStyle(color: Colors.white54),
-                          prefixIcon:
-                              Icon(Icons.search_rounded, color: cs.primary),
-                          suffixIcon: _query.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.clear,
-                                      color: Colors.white70),
-                                  onPressed: () {
-                                    _searchCtrl.clear();
-                                    setState(() => _query = '');
-                                  },
-                                )
-                              : null,
-                          filled: true,
-                          fillColor: const Color(0xFF141418),
-                          contentPadding: EdgeInsets.zero,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(28),
-                            borderSide: BorderSide.none,
+                  ),
+                  FilterChip(
+                    label: Text(_categorizedMode ? 'Categories' : 'A - Z Grid'),
+                    avatar: Icon(
+                      _categorizedMode
+                          ? Icons.folder_copy_outlined
+                          : Icons.grid_view_rounded,
+                      size: 18,
+                    ),
+                    selected: _categorizedMode,
+                    onSelected: (val) {
+                      setState(() => _categorizedMode = val);
+                      _savePreferences();
+                    },
+                  ),
+                ],
+              ),
+            ),
+
+            // Ultra-Fast Pre-Cached App List / Grid
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _categorizedMode
+                      ? _buildCategorizedDrawer(cs)
+                      : GridView.builder(
+                          controller: _drawerScrollController,
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                          physics: const BouncingScrollPhysics(
+                            parent: AlwaysScrollableScrollPhysics(),
                           ),
+                          cacheExtent: 1500, // Keeps off-screen apps rendered for 120Hz scrolling
+                          itemCount: _filteredApps.length,
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: _gridColumns,
+                            mainAxisSpacing: 18,
+                            crossAxisSpacing: 12,
+                            childAspectRatio: 0.80,
+                          ),
+                          itemBuilder: (context, index) {
+                            final app = _filteredApps[index];
+                            return RepaintBoundary(
+                              child: _buildAppIcon(
+                                app,
+                                size: 56,
+                                textColor: cs.onSurface,
+                              ),
+                            );
+                          },
                         ),
-                        onSubmitted: (v) {
-                          if (searchFiltered.isNotEmpty) {
-                            state.launch(searchFiltered.first.pkg);
-                          } else if (v.trim().isNotEmpty) {
-                            state.searchWeb(v);
-                          }
-                        },
+            ),
+
+            // Bottom Ergonomic Search Bar + Close Button
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerLow,
+                border: Border(
+                  top: BorderSide(
+                    color: cs.outlineVariant.withOpacity(0.3),
+                  ),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocus,
+                      onChanged: _filterApps,
+                      style: TextStyle(color: cs.onSurface),
+                      decoration: InputDecoration(
+                        hintText: 'Search installed apps...',
+                        hintStyle: TextStyle(color: cs.onSurfaceVariant),
+                        prefixIcon:
+                            Icon(Icons.search_rounded, color: cs.primary),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear_rounded),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  _filterApps('');
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: cs.surfaceContainerHighest.withOpacity(0.65),
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(28),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 10),
+                  IconButton.filledTonal(
+                    onPressed: _closeDrawer,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                    tooltip: 'Close Drawer',
+                  ),
+                ],
               ),
             ),
           ],
@@ -1194,303 +1046,133 @@ class _LauncherShellState extends State<LauncherShell>
     );
   }
 
+  Widget _buildCategorizedDrawer(ColorScheme cs) {
+    final Map<String, List<AppModel>> groups = {};
+    for (final app in _filteredApps) {
+      groups.putIfAbsent(app.category, () => []).add(app);
+    }
+    final categories = groups.keys.toList()..sort();
+
+    return ListView.builder(
+      controller: _drawerScrollController,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      physics: const BouncingScrollPhysics(),
+      cacheExtent: 1200,
+      itemCount: categories.length,
+      itemBuilder: (context, idx) {
+        final category = categories[idx];
+        final apps = groups[category]!;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: cs.primary,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$category (${apps.length})',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: cs.primary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: apps.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: _gridColumns,
+                  mainAxisSpacing: 14,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.80,
+                ),
+                itemBuilder: (context, i) {
+                  return RepaintBoundary(
+                    child: _buildAppIcon(
+                      apps[i],
+                      size: 52,
+                      textColor: cs.onSurface,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final h = MediaQuery.of(context).size.height;
+    final cs = Theme.of(context).colorScheme;
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (_drawerCtrl.value > 0.1) {
+        if (_drawerController.value > 0.1) {
           _closeDrawer();
         }
       },
       child: Scaffold(
-        backgroundColor: state.amoledMode ? Colors.black : Colors.transparent,
-        resizeToAvoidBottomInset: false,
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: true,
         body: Stack(
-          fit: StackFit.expand,
           children: [
+            // Home Screen Layer
             RepaintBoundary(
-              child: _buildHomePage(context, h),
+              child: _buildHomeScreen(cs),
             ),
-            SlideTransition(
-              position: _drawerOffset,
+
+            // Hardware-Accelerated App Drawer Layer
+            AnimatedBuilder(
+              animation: _drawerController,
+              builder: (context, child) {
+                final val = _drawerController.value.clamp(0.0, 1.0);
+                if (val == 0.0) return const SizedBox.shrink();
+
+                return Stack(
+                  children: [
+                    // Scrim Overlay
+                    GestureDetector(
+                      onTap: _closeDrawer,
+                      child: Container(
+                        color: Colors.black.withOpacity(0.45 * val),
+                      ),
+                    ),
+                    // Sliding Sheet
+                    FractionalTranslation(
+                      translation: Offset(0, 1.0 - val),
+                      child: child,
+                    ),
+                  ],
+                );
+              },
               child: RepaintBoundary(
-                child: _buildAppDrawer(context, h),
+                child: _buildDrawerSheet(cs),
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-}
-
-class LauncherSettingsSheet extends StatelessWidget {
-  const LauncherSettingsSheet({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: state,
-      builder: (context, _) {
-        final cs = Theme.of(context).colorScheme;
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.82,
-          maxChildSize: 0.95,
-          minChildSize: 0.5,
-          builder: (ctx, scrollCtrl) {
-            return ListView(
-              controller: scrollCtrl,
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [cs.primaryContainer, cs.tertiaryContainer],
-                    ),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 26,
-                        backgroundColor: cs.primary,
-                        child: Icon(Icons.phone_iphone_rounded,
-                            color: cs.onPrimary, size: 28),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Caesium Launcher',
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                                color: cs.onPrimaryContainer,
-                              ),
-                            ),
-                            Text(
-                              'Made by Alex Desrosier • 120Hz Enforced',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: cs.onPrimaryContainer
-                                    .withValues(alpha: 0.8),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-
-                const Text(
-                  'Home Screen Grid Size',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.tonal(
-                        onPressed: () => state.setGridSize(4, 4),
-                        style: FilledButton.styleFrom(
-                          backgroundColor:
-                              state.gridCols == 4 && state.gridRows == 4
-                                  ? cs.primaryContainer
-                                  : const Color(0xFF1E1E24),
-                        ),
-                        child: const Text('4 x 4'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.tonal(
-                        onPressed: () => state.setGridSize(4, 5),
-                        style: FilledButton.styleFrom(
-                          backgroundColor:
-                              state.gridCols == 4 && state.gridRows == 5
-                                  ? cs.primaryContainer
-                                  : const Color(0xFF1E1E24),
-                        ),
-                        child: const Text('4 x 5'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.tonal(
-                        onPressed: () => state.setGridSize(5, 5),
-                        style: FilledButton.styleFrom(
-                          backgroundColor:
-                              state.gridCols == 5 && state.gridRows == 5
-                                  ? cs.primaryContainer
-                                  : const Color(0xFF1E1E24),
-                        ),
-                        child: const Text('5 x 5'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.tonal(
-                        onPressed: () => state.setGridSize(5, 6),
-                        style: FilledButton.styleFrom(
-                          backgroundColor:
-                              state.gridCols == 5 && state.gridRows == 6
-                                  ? cs.primaryContainer
-                                  : const Color(0xFF1E1E24),
-                        ),
-                        child: const Text('5 x 6'),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 18),
-                const Text(
-                  'App Icon Shape',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 10),
-                GridView.count(
-                  crossAxisCount: 3,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.25,
-                  children: [
-                    for (final s in IconShape.values)
-                      GestureDetector(
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          state.setIconShape(s);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          decoration: BoxDecoration(
-                            color: state.iconShape == s
-                                ? cs.primaryContainer
-                                : const Color(0xFF1E1E24),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: state.iconShape == s
-                                  ? cs.primary
-                                  : Colors.white12,
-                              width: state.iconShape == s ? 2 : 1,
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              PhysicalShape(
-                                clipper: ShapeBorderClipper(
-                                    shape: buildIconShape(s, 36)),
-                                color: state.iconShape == s
-                                    ? cs.primary
-                                    : Colors.white38,
-                                child: const SizedBox(width: 36, height: 36),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                shapeNames[s] ?? '',
-                                style: TextStyle(
-                                  color: state.iconShape == s
-                                      ? cs.onPrimaryContainer
-                                      : Colors.white70,
-                                  fontSize: 12,
-                                  fontWeight: state.iconShape == s
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-                FilledButton.icon(
-                  onPressed: state.openHomeSettings,
-                  icon: const Icon(Icons.home_filled),
-                  label: const Text('Set as Default System Launcher'),
-                ),
-                const SizedBox(height: 8),
-                FilledButton.tonalIcon(
-                  onPressed: state.pickWallpaper,
-                  icon: const Icon(Icons.wallpaper_rounded),
-                  label: const Text('Change System Wallpaper'),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Appearance & Backdrop',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile.adaptive(
-                  value: state.amoledMode,
-                  onChanged: state.setAmoled,
-                  title: const Text('Pure AMOLED Black (#000000)',
-                      style: TextStyle(color: Colors.white)),
-                  subtitle: const Text(
-                      'Replaces live system wallpaper with pitch black',
-                      style: TextStyle(color: Colors.white60)),
-                ),
-                SwitchListTile.adaptive(
-                  value: state.showLabels,
-                  onChanged: state.setShowLabels,
-                  title: const Text('Show App Icon Labels',
-                      style: TextStyle(color: Colors.white)),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Accent Color',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    for (int i = 0; i < seedOptions.length; i++)
-                      GestureDetector(
-                        onTap: () => state.setSeed(i),
-                        child: Chip(
-                          avatar: CircleAvatar(
-                            backgroundColor: seedOptions[i].color,
-                          ),
-                          label: Text(seedOptions[i].name),
-                          backgroundColor: state.seedIndex == i
-                              ? cs.primaryContainer
-                              : const Color(0xFF1E1E22),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            );
-          },
-        );
-      },
     );
   }
 }
