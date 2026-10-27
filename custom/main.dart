@@ -363,7 +363,7 @@ class PixelLauncherApp extends StatelessWidget {
               brightness: Brightness.dark,
             );
             return MaterialApp(
-              title: 'Pixel Launcher',
+              title: 'Pixel Launcher MD3',
               debugShowCheckedModeBanner: false,
               theme: ThemeData(
                 useMaterial3: true,
@@ -435,6 +435,7 @@ class AppIconTile extends StatelessWidget {
                 color: Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
+                shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
               ),
             ),
           ],
@@ -467,7 +468,7 @@ class _LauncherShellState extends State<LauncherShell>
     WidgetsBinding.instance.addObserver(this);
     _drawerCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 240),
+      duration: const Duration(milliseconds: 260),
     );
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _now = DateTime.now());
@@ -536,7 +537,7 @@ class _LauncherShellState extends State<LauncherShell>
     }
   }
 
-  void _showAppMenu(AppItem app, {bool isHomePin = false}) {
+  void _showAppMenu(AppItem app) {
     HapticFeedback.mediumImpact();
     final inDock = state.dockPkgs.contains(app.pkg);
     final inHome = state.homeSlots.containsValue(app.pkg);
@@ -544,7 +545,7 @@ class _LauncherShellState extends State<LauncherShell>
 
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF161618),
+      backgroundColor: cs.surfaceContainerHighest,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -552,7 +553,7 @@ class _LauncherShellState extends State<LauncherShell>
       builder: (ctx) {
         return SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -566,18 +567,18 @@ class _LauncherShellState extends State<LauncherShell>
                   ),
                   title: Text(
                     app.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 18,
-                      color: Colors.white,
+                      color: cs.onSurface,
                     ),
                   ),
                   subtitle: Text(
                     app.pkg,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
                   ),
                 ),
-                const Divider(color: Colors.white12),
+                const Divider(height: 24),
                 ListTile(
                   leading: Icon(
                     inHome ? Icons.star_rounded : Icons.star_border_rounded,
@@ -585,7 +586,7 @@ class _LauncherShellState extends State<LauncherShell>
                   ),
                   title: Text(
                     inHome ? 'Remove from Home Screen' : 'Pin to Home Screen',
-                    style: const TextStyle(color: Colors.white),
+                    style: TextStyle(color: cs.onSurface),
                   ),
                   onTap: () {
                     Navigator.pop(ctx);
@@ -605,7 +606,7 @@ class _LauncherShellState extends State<LauncherShell>
                   ),
                   title: Text(
                     inDock ? 'Remove from Bottom Dock' : 'Pin to Bottom Dock',
-                    style: const TextStyle(color: Colors.white),
+                    style: TextStyle(color: cs.onSurface),
                   ),
                   onTap: () {
                     Navigator.pop(ctx);
@@ -613,20 +614,19 @@ class _LauncherShellState extends State<LauncherShell>
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.category_rounded,
-                      color: Colors.white70),
-                  title: const Text('Change App Icon Shape',
-                      style: TextStyle(color: Colors.white)),
+                  leading: Icon(Icons.category_rounded, color: cs.onSurfaceVariant),
+                  title: Text('Change Icon Shape',
+                      style: TextStyle(color: cs.onSurface)),
                   onTap: () {
                     Navigator.pop(ctx);
                     _openLauncherSettings();
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.info_outline_rounded,
-                      color: Colors.white70),
-                  title: const Text('App Info',
-                      style: TextStyle(color: Colors.white)),
+                  leading: Icon(Icons.info_outline_rounded,
+                      color: cs.onSurfaceVariant),
+                  title: Text('App Info',
+                      style: TextStyle(color: cs.onSurface)),
                   onTap: () {
                     Navigator.pop(ctx);
                     state.openAppInfo(app.pkg);
@@ -655,7 +655,7 @@ class _LauncherShellState extends State<LauncherShell>
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF121214),
+      backgroundColor: const Color(0xFF141418),
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
@@ -693,12 +693,12 @@ class _LauncherShellState extends State<LauncherShell>
 
   Widget _buildGlassBox({
     required Widget child,
-    double radius = 28,
+    double radius = 30,
     EdgeInsets padding = const EdgeInsets.all(12),
   }) {
     final baseColor = state.amoledMode
-        ? const Color(0xFF141416)
-        : Colors.black.withValues(alpha: 0.45);
+        ? const Color(0xFF101012)
+        : Colors.black.withValues(alpha: 0.48);
     if (!state.glassEffect || state.amoledMode) {
       return Container(
         padding: padding,
@@ -713,7 +713,7 @@ class _LauncherShellState extends State<LauncherShell>
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
@@ -757,6 +757,7 @@ class _LauncherShellState extends State<LauncherShell>
                             color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.w600,
+                            shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -768,6 +769,7 @@ class _LauncherShellState extends State<LauncherShell>
                             fontWeight: FontWeight.w800,
                             height: 1.0,
                             letterSpacing: -2,
+                            shadows: [Shadow(color: Colors.black87, blurRadius: 10)],
                           ),
                         ),
                       ],
@@ -776,15 +778,16 @@ class _LauncherShellState extends State<LauncherShell>
                   IconButton(
                     onPressed: _openLauncherSettings,
                     style: IconButton.styleFrom(
-                      backgroundColor: Colors.black.withValues(alpha: 0.38),
+                      backgroundColor: Colors.black.withValues(alpha: 0.4),
                     ),
                     icon: const Icon(Icons.tune_rounded, color: Colors.white),
-                    tooltip: 'Home Settings & Grid',
+                    tooltip: 'Launcher Settings & Grid',
                   ),
                 ],
               ),
               const Spacer(),
 
+              // Drag & Drop Home Screen Grid
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -811,9 +814,12 @@ class _LauncherShellState extends State<LauncherShell>
                         return Container(
                           decoration: BoxDecoration(
                             color: candidateData.isNotEmpty
-                                ? Colors.white.withValues(alpha: 0.15)
+                                ? Colors.white.withValues(alpha: 0.2)
                                 : Colors.transparent,
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(20),
+                            border: candidateData.isNotEmpty
+                                ? Border.all(color: cs.primary, width: 2)
+                                : null,
                           ),
                         );
                       }
@@ -822,19 +828,19 @@ class _LauncherShellState extends State<LauncherShell>
                         feedback: Material(
                           color: Colors.transparent,
                           child: Opacity(
-                            opacity: 0.85,
+                            opacity: 0.88,
                             child: AppIconTile(
                               app: app,
                               shape: state.iconShape,
                               showLabel: state.showLabels,
-                              size: 56,
+                              size: 58,
                               onTap: () {},
                               onLongPress: () {},
                             ),
                           ),
                         ),
                         childWhenDragging: Opacity(
-                          opacity: 0.3,
+                          opacity: 0.25,
                           child: AppIconTile(
                             app: app,
                             shape: state.iconShape,
@@ -861,7 +867,7 @@ class _LauncherShellState extends State<LauncherShell>
               GestureDetector(
                 onTap: _openDrawer,
                 child: _buildGlassBox(
-                  radius: 32,
+                  radius: 34,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                   child: Row(
@@ -949,25 +955,88 @@ class _LauncherShellState extends State<LauncherShell>
     }).toList();
 
     return Container(
-      color: state.amoledMode ? Colors.black : const Color(0xF20E0E10),
+      color: state.amoledMode ? Colors.black : const Color(0xF2101014),
       child: SafeArea(
         child: Column(
           children: [
+            Expanded(
+              child: state.loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: (n) {
+                        // Smooth pull-down to return home from top of app list
+                        if (n is OverscrollNotification &&
+                            n.overscroll < -12 &&
+                            _gridScrollCtrl.offset <= 0) {
+                          _closeDrawer();
+                          return true;
+                        }
+                        return false;
+                      },
+                      child: GridView.builder(
+                        controller: _gridScrollCtrl,
+                        physics: const BouncingScrollPhysics(
+                            parent: AlwaysScrollableScrollPhysics()),
+                        cacheExtent: 2500,
+                        addRepaintBoundaries: true,
+                        addAutomaticKeepAlives: true,
+                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: state.gridCols,
+                          mainAxisSpacing: 18,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 0.78,
+                        ),
+                        itemCount: filtered.length,
+                        itemBuilder: (ctx, i) {
+                          final app = filtered[i];
+                          return AppIconTile(
+                            key: ValueKey(app.pkg),
+                            app: app,
+                            shape: state.iconShape,
+                            showLabel: state.showLabels,
+                            size: 56,
+                            onTap: () => state.launch(app.pkg),
+                            onLongPress: () => _showAppMenu(app),
+                          );
+                        },
+                      ),
+                    ),
+            ),
+
+            if (_query.trim().isNotEmpty && filtered.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: FilledButton.icon(
+                  onPressed: () => state.searchWeb(_query),
+                  icon: const Icon(Icons.travel_explore_rounded),
+                  label: Text('Search Google for "$_query"'),
+                ),
+              ),
+
+            // Material You Bottom Drawer Bar (Search + Close Arrow)
             GestureDetector(
-              onVerticalDragUpdate: (d) {
-                _onVerticalDragUpdate(d, screenHeight);
-              },
+              onVerticalDragUpdate: (d) =>
+                  _onVerticalDragUpdate(d, screenHeight),
               onVerticalDragEnd: _onVerticalDragEnd,
               behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 16, 8),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHigh.withValues(alpha: 0.65),
+                  border: Border(
+                      top: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.1))),
+                ),
                 child: Row(
                   children: [
                     IconButton(
                       icon: const Icon(Icons.keyboard_arrow_down_rounded,
                           color: Colors.white, size: 30),
+                      tooltip: 'Back to Home',
                       onPressed: _closeDrawer,
                     ),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: TextField(
                         controller: _searchCtrl,
@@ -990,7 +1059,7 @@ class _LauncherShellState extends State<LauncherShell>
                                 )
                               : null,
                           filled: true,
-                          fillColor: const Color(0xFF1C1C20),
+                          fillColor: const Color(0xFF1E1E24),
                           contentPadding: EdgeInsets.zero,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(28),
@@ -1009,58 +1078,6 @@ class _LauncherShellState extends State<LauncherShell>
                   ],
                 ),
               ),
-            ),
-            if (_query.trim().isNotEmpty && filtered.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: FilledButton.icon(
-                  onPressed: () => state.searchWeb(_query),
-                  icon: const Icon(Icons.travel_explore_rounded),
-                  label: Text('Search Google for "$_query"'),
-                ),
-              ),
-            Expanded(
-              child: state.loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : NotificationListener<ScrollNotification>(
-                      onNotification: (n) {
-                        if (n is OverscrollNotification &&
-                            n.overscroll < -12 &&
-                            _gridScrollCtrl.offset <= 0) {
-                          _closeDrawer();
-                          return true;
-                        }
-                        return false;
-                      },
-                      child: GridView.builder(
-                        controller: _gridScrollCtrl,
-                        physics: const BouncingScrollPhysics(
-                            parent: AlwaysScrollableScrollPhysics()),
-                        cacheExtent: 2500,
-                        addRepaintBoundaries: true,
-                        addAutomaticKeepAlives: true,
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: state.gridCols,
-                          mainAxisSpacing: 18,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 0.78,
-                        ),
-                        itemCount: filtered.length,
-                        itemBuilder: (ctx, i) {
-                          final app = filtered[i];
-                          return AppIconTile(
-                            key: ValueKey(app.pkg),
-                            app: app,
-                            shape: state.iconShape,
-                            showLabel: state.showLabels,
-                            size: 56,
-                            onTap: () => state.launch(app.pkg),
-                            onLongPress: () => _showAppMenu(app),
-                          );
-                        },
-                      ),
-                    ),
             ),
           ],
         ),
@@ -1159,7 +1176,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Pixel Launcher Grid',
+                              'Pixel Launcher MD3',
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w800,
@@ -1199,7 +1216,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           backgroundColor:
                               state.gridCols == 4 && state.gridRows == 4
                                   ? cs.primaryContainer
-                                  : const Color(0xFF1C1C20),
+                                  : const Color(0xFF1E1E24),
                         ),
                         child: const Text('4 x 4'),
                       ),
@@ -1212,7 +1229,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           backgroundColor:
                               state.gridCols == 4 && state.gridRows == 5
                                   ? cs.primaryContainer
-                                  : const Color(0xFF1C1C20),
+                                  : const Color(0xFF1E1E24),
                         ),
                         child: const Text('4 x 5'),
                       ),
@@ -1225,7 +1242,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           backgroundColor:
                               state.gridCols == 5 && state.gridRows == 5
                                   ? cs.primaryContainer
-                                  : const Color(0xFF1C1C20),
+                                  : const Color(0xFF1E1E24),
                         ),
                         child: const Text('5 x 5'),
                       ),
@@ -1238,7 +1255,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           backgroundColor:
                               state.gridCols == 5 && state.gridRows == 6
                                   ? cs.primaryContainer
-                                  : const Color(0xFF1C1C20),
+                                  : const Color(0xFF1E1E24),
                         ),
                         child: const Text('5 x 6'),
                       ),
@@ -1274,7 +1291,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: state.iconShape == s
                                 ? cs.primaryContainer
-                                : const Color(0xFF1C1C20),
+                                : const Color(0xFF1E1E24),
                             borderRadius: BorderRadius.circular(18),
                             border: Border.all(
                               color: state.iconShape == s
@@ -1382,7 +1399,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           label: Text(seedOptions[i].name),
                           backgroundColor: state.seedIndex == i
                               ? cs.primaryContainer
-                              : const Color(0xFF1E1E22),
+                              : const Color(0xFF1E1E24),
                         ),
                       ),
                   ],
