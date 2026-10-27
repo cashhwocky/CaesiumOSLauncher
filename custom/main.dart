@@ -524,7 +524,6 @@ class _LauncherShellState extends State<LauncherShell>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _drawerCtrl;
   late final Animation<Offset> _drawerOffset;
-  late final Animation<double> _homeOpacity;
 
   final ScrollController _gridScrollCtrl = ScrollController();
   final TextEditingController _searchCtrl = TextEditingController();
@@ -540,7 +539,7 @@ class _LauncherShellState extends State<LauncherShell>
 
     _drawerCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 180),
     );
 
     _drawerOffset = Tween<Offset>(
@@ -551,13 +550,6 @@ class _LauncherShellState extends State<LauncherShell>
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     ));
-
-    _homeOpacity = Tween<double>(begin: 1.0, end: 0.0).animate(
-      CurvedAnimation(
-        parent: _drawerCtrl,
-        curve: const Interval(0.0, 0.4, curve: Curves.linear),
-      ),
-    );
 
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _now = DateTime.now());
@@ -615,11 +607,11 @@ class _LauncherShellState extends State<LauncherShell>
 
   void _onVerticalDragEnd(DragEndDetails d) {
     final v = d.primaryVelocity ?? 0.0;
-    if (v < -250) {
+    if (v < -200) {
       _drawerCtrl.forward();
-    } else if (v > 250) {
+    } else if (v > 200) {
       _closeDrawer();
-    } else if (_drawerCtrl.value > 0.4) {
+    } else if (_drawerCtrl.value > 0.35) {
       _drawerCtrl.forward();
     } else {
       _closeDrawer();
@@ -829,7 +821,6 @@ class _LauncherShellState extends State<LauncherShell>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // iOS-Style Glass Widget Card Header
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -883,7 +874,6 @@ class _LauncherShellState extends State<LauncherShell>
               ),
               const Spacer(),
 
-              // iOS Spaced Icon Grid
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -960,7 +950,6 @@ class _LauncherShellState extends State<LauncherShell>
                 },
               ),
 
-              // iOS Frosted Floating Dock (No redundant bottom bars)
               _buildGlassBox(
                 radius: 40,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1136,7 +1125,6 @@ class _LauncherShellState extends State<LauncherShell>
                 ),
               ),
 
-            // Bottom Drawer Bar
             GestureDetector(
               onVerticalDragUpdate: (d) =>
                   _onVerticalDragUpdate(d, screenHeight),
@@ -1222,11 +1210,8 @@ class _LauncherShellState extends State<LauncherShell>
         body: Stack(
           fit: StackFit.expand,
           children: [
-            FadeTransition(
-              opacity: _homeOpacity,
-              child: RepaintBoundary(
-                child: _buildHomePage(context, h),
-              ),
+            RepaintBoundary(
+              child: _buildHomePage(context, h),
             ),
             SlideTransition(
               position: _drawerOffset,
@@ -1290,7 +1275,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              'Made by Alex Desrosier • iOS Edition',
+                              'Made by Alex Desrosier • 120Hz Enforced',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: cs.onPrimaryContainer
@@ -1496,7 +1481,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           label: Text(seedOptions[i].name),
                           backgroundColor: state.seedIndex == i
                               ? cs.primaryContainer
-                              : const Color(0xFF1E1E24),
+                              : const Color(0xFF1E1E22),
                         ),
                       ),
                   ],
