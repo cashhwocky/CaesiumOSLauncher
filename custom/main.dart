@@ -1,5 +1,6 @@
 // FILE: custom/main.dart
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -96,27 +97,35 @@ class LauncherState extends ChangeNotifier {
   List<AppItem> apps = [];
   List<String> dockPkgs = [];
   Map<int, String> homeSlots = {};
-  bool loading = true;
+  
+  // Axion OS style category mapping: categoryName -> list of package names
+  Map<String, List<String>> categories = {
+    'Social & Chat': [],
+    'Media & Audio': [],
+    'Tools & System': [],
+    'Games': [],
+  };
 
+  bool loading = true;
   bool amoledMode = false;
-  bool glassEffect = true;
+  bool glassEffect = false;
   bool dynamicWallpaperColor = true;
   int seedIndex = 0;
   int gridCols = 4;
   int gridRows = 5;
   bool showLabels = true;
-  IconShape iconShape = IconShape.circle;
+  IconShape iconShape = IconShape.squircle;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     amoledMode = _prefs?.getBool('amoled') ?? false;
-    glassEffect = _prefs?.getBool('glass') ?? true;
+    glassEffect = _prefs?.getBool('glass') ?? false;
     dynamicWallpaperColor = _prefs?.getBool('dyn') ?? true;
     seedIndex = (_prefs?.getInt('seed') ?? 0).clamp(0, seedOptions.length - 1);
     gridCols = (_prefs?.getInt('cols') ?? 4).clamp(4, 5);
     gridRows = (_prefs?.getInt('rows') ?? 5).clamp(4, 6);
     showLabels = _prefs?.getBool('labels') ?? true;
-    final shapeIdx = (_prefs?.getInt('shape') ?? 0)
+    final shapeIdx = (_prefs?.getInt('shape') ?? 1)
         .clamp(0, IconShape.values.length - 1);
     iconShape = IconShape.values[shapeIdx];
     dockPkgs = _prefs?.getStringList('dock') ?? [];
@@ -129,6 +138,14 @@ class LauncherState extends ChangeNotifier {
       }
     }
 
+    final savedCats = _prefs?.getString('categories');
+    if (savedCats != null) {
+      try {
+        final decoded = jsonDecode(savedCats) as Map;
+        categories = decoded.map((k, v) => MapEntry(k as String, List<String>.from(v as List)));
+      } catch (_) {}
+    }
+
     notifyListeners();
     await refreshApps();
   }
@@ -137,6 +154,30 @@ class LauncherState extends ChangeNotifier {
     final total = gridCols * gridRows;
     final list = List.generate(total, (i) => homeSlots[i] ?? '');
     _prefs?.setStringList('home_slots', list);
+  }
+
+  void _saveCategories() {
+    _prefs?.setString('categories', jsonEncode(categories));
+    notifyListeners();
+  }
+
+  void assignCategory(String pkg, String category) {
+    // Remove from all other categories first
+    categories.forEach((cat, list) {
+      list.remove(pkg);
+    });
+    if (category.isNotEmpty) {
+      categories[category] ??= [];
+      categories[category]!.add(pkg);
+    }
+    _saveCategories();
+  }
+
+  String getAppCategory(String pkg) {
+    for (final entry in categories.entries) {
+      if (entry.value.contains(pkg)) return entry.key;
+    }
+    return 'Uncategorized';
   }
 
   Future<void> refreshApps() async {
@@ -182,6 +223,33 @@ class LauncherState extends ChangeNotifier {
           dockPkgs = defaults;
           _prefs?.setStringList('dock', dockPkgs);
         }
+
+        // Auto-categorize apps if not categorized yet
+        bool catChanged = false;
+        for (final a in apps) {
+          if (getAppCategory(a.pkg) == 'Uncategorized') {
+            final l = a.pkg.toLowerCase();
+            final name = a.name.toLowerCase();
+            if (l.contains('whatsapp') || l.contains('telegram') || l.contains('discord') || l.contains('snapchat') || l.contains('message') || l.contains('twitter') || l.contains('reddit')) {
+              categories['Social & Chat'] ??= [];
+              categories['Social & Chat']!.add(a.pkg);
+              catChanged = true;
+            } else if (l.contains('spotify') || l.contains('youtube') || l.contains('music') || l.contains('audio_player') || l.contains('netflix') || l.contains('media') || l.contains('camera')) {
+              categories['Media & Audio'] ??= [];
+              categories['Media & Audio']!.add(a.pkg);
+              catChanged = true;
+            } else if (name.contains('game') || l.contains('minecraft') || l.contains('fortnite')) {
+              categories['Games'] ??= [];
+              categories['Games']!.add(a.pkg);
+              catChanged = true;
+            } else {
+              categories['Tools & System'] ??= [];
+              categories['Tools & System']!.add(a.pkg);
+              catChanged = true;
+            }
+          }
+        }
+        if (catChanged) _saveCategories();
 
         if (homeSlots.isEmpty && apps.isNotEmpty) {
           int slot = 0;
@@ -332,8 +400,8 @@ final LauncherState state = LauncherState();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  PaintingBinding.instance.imageCache.maximumSize = 500;
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 120 << 20;
+  PaintingBinding.instance.imageCache.maximumSize = 1000;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 250 << 20;
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -399,47 +467,49 @@ class AppIconTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          PhysicalShape(
-            clipper: ShapeBorderClipper(shape: buildIconShape(shape, size)),
-            clipBehavior: Clip.antiAlias,
-            color: Colors.transparent,
-            child: SizedBox(
-              width: size,
-              height: size,
-              child: Image(
-                image: app.provider,
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            PhysicalShape(
+              clipper: ShapeBorderClipper(shape: buildIconShape(shape, size)),
+              clipBehavior: Clip.antiAlias,
+              color: Colors.transparent,
+              child: SizedBox(
                 width: size,
                 height: size,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                filterQuality: FilterQuality.low,
+                child: Image(
+                  image: app.provider,
+                  width: size,
+                  height: size,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  filterQuality: FilterQuality.none,
+                ),
               ),
             ),
-          ),
-          if (showLabel) ...[
-            const SizedBox(height: 6),
-            Text(
-              app.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+            if (showLabel) ...[
+              const SizedBox(height: 6),
+              Text(
+                app.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  shadows: [Shadow(color: Colors.black87, blurRadius: 4)],
+                ),
               ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -455,6 +525,9 @@ class LauncherShell extends StatefulWidget {
 class _LauncherShellState extends State<LauncherShell>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final AnimationController _drawerCtrl;
+  late final Animation<Offset> _drawerOffset;
+  late final Animation<double> _homeOpacity;
+
   final ScrollController _gridScrollCtrl = ScrollController();
   final TextEditingController _searchCtrl = TextEditingController();
   String _query = '';
@@ -466,10 +539,28 @@ class _LauncherShellState extends State<LauncherShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
     _drawerCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 260),
+      duration: const Duration(milliseconds: 220),
     );
+
+    _drawerOffset = Tween<Offset>(
+      begin: const Offset(0, 1.0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _drawerCtrl,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    ));
+
+    _homeOpacity = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _drawerCtrl,
+        curve: const Interval(0.0, 0.45, curve: Curves.linear),
+      ),
+    );
+
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
@@ -512,12 +603,12 @@ class _LauncherShellState extends State<LauncherShell>
 
   void _openDrawer() {
     HapticFeedback.selectionClick();
-    _drawerCtrl.fling(velocity: 2.2);
+    _drawerCtrl.forward();
   }
 
   void _closeDrawer() {
     FocusScope.of(context).unfocus();
-    _drawerCtrl.fling(velocity: -2.2);
+    _drawerCtrl.reverse();
   }
 
   void _onVerticalDragUpdate(DragUpdateDetails d, double height) {
@@ -526,12 +617,12 @@ class _LauncherShellState extends State<LauncherShell>
 
   void _onVerticalDragEnd(DragEndDetails d) {
     final v = d.primaryVelocity ?? 0.0;
-    if (v < -350) {
-      _drawerCtrl.fling(velocity: 2.4);
-    } else if (v > 350) {
+    if (v < -250) {
+      _drawerCtrl.forward();
+    } else if (v > 250) {
       _closeDrawer();
-    } else if (_drawerCtrl.value > 0.35) {
-      _drawerCtrl.fling(velocity: 2.0);
+    } else if (_drawerCtrl.value > 0.4) {
+      _drawerCtrl.forward();
     } else {
       _closeDrawer();
     }
@@ -541,6 +632,7 @@ class _LauncherShellState extends State<LauncherShell>
     HapticFeedback.mediumImpact();
     final inDock = state.dockPkgs.contains(app.pkg);
     final inHome = state.homeSlots.containsValue(app.pkg);
+    final currentCat = state.getAppCategory(app.pkg);
     final cs = Theme.of(context).colorScheme;
 
     showModalBottomSheet<void>(
@@ -574,11 +666,39 @@ class _LauncherShellState extends State<LauncherShell>
                     ),
                   ),
                   subtitle: Text(
-                    app.pkg,
-                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+                    'Category: $currentCat',
+                    style: TextStyle(color: cs.primary, fontSize: 13, fontWeight: FontWeight.w500),
                   ),
                 ),
                 const Divider(height: 24),
+
+                // Category selector buttons
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('Move to Category:', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final catName in state.categories.keys)
+                      ActionChip(
+                        label: Text(catName),
+                        backgroundColor: currentCat == catName ? cs.primaryContainer : const Color(0xFF1E1E24),
+                        labelStyle: TextStyle(color: currentCat == catName ? cs.onPrimaryContainer : Colors.white, fontSize: 12),
+                        onPressed: () {
+                          state.assignCategory(app.pkg, catName);
+                          Navigator.pop(ctx);
+                        },
+                      ),
+                  ],
+                ),
+                const Divider(height: 24),
+
                 ListTile(
                   leading: Icon(
                     inHome ? Icons.star_rounded : Icons.star_border_rounded,
@@ -611,15 +731,6 @@ class _LauncherShellState extends State<LauncherShell>
                   onTap: () {
                     Navigator.pop(ctx);
                     state.toggleDock(app.pkg);
-                  },
-                ),
-                ListTile(
-                  leading: Icon(Icons.category_rounded, color: cs.onSurfaceVariant),
-                  title: Text('Change Icon Shape',
-                      style: TextStyle(color: cs.onSurface)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _openLauncherSettings();
                   },
                 ),
                 ListTile(
@@ -691,39 +802,21 @@ class _LauncherShellState extends State<LauncherShell>
     return '$d, $m ${dt.day}';
   }
 
-  Widget _buildGlassBox({
+  Widget _buildSurfaceContainer({
     required Widget child,
     double radius = 30,
     EdgeInsets padding = const EdgeInsets.all(12),
   }) {
-    final baseColor = state.amoledMode
-        ? const Color(0xFF101012)
-        : Colors.black.withValues(alpha: 0.48);
-    if (!state.glassEffect || state.amoledMode) {
-      return Container(
-        padding: padding,
-        decoration: BoxDecoration(
-          color: baseColor,
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-        ),
-        child: child,
-      );
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: baseColor,
-            borderRadius: BorderRadius.circular(radius),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-          ),
-          child: child,
-        ),
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: state.amoledMode
+            ? const Color(0xFF101012)
+            : const Color(0x99000000),
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
       ),
+      child: child,
     );
   }
 
@@ -828,7 +921,7 @@ class _LauncherShellState extends State<LauncherShell>
                         feedback: Material(
                           color: Colors.transparent,
                           child: Opacity(
-                            opacity: 0.88,
+                            opacity: 0.9,
                             child: AppIconTile(
                               app: app,
                               shape: state.iconShape,
@@ -866,7 +959,7 @@ class _LauncherShellState extends State<LauncherShell>
 
               GestureDetector(
                 onTap: _openDrawer,
-                child: _buildGlassBox(
+                child: _buildSurfaceContainer(
                   radius: 34,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -891,7 +984,7 @@ class _LauncherShellState extends State<LauncherShell>
                 ),
               ),
               const SizedBox(height: 14),
-              _buildGlassBox(
+              _buildSurfaceContainer(
                 radius: 34,
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -927,7 +1020,7 @@ class _LauncherShellState extends State<LauncherShell>
                       Icon(Icons.keyboard_arrow_up_rounded,
                           color: Colors.white.withValues(alpha: 0.75), size: 22),
                       Text(
-                        'Swipe up for all apps (${state.apps.length})',
+                        'Swipe up for categorized apps',
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.7),
                           fontSize: 11,
@@ -948,14 +1041,18 @@ class _LauncherShellState extends State<LauncherShell>
   Widget _buildAppDrawer(BuildContext context, double screenHeight) {
     final cs = Theme.of(context).colorScheme;
     final q = _query.trim().toLowerCase();
-    final filtered = state.apps.where((a) {
-      if (q.isEmpty) return true;
-      return a.name.toLowerCase().contains(q) ||
-          a.pkg.toLowerCase().contains(q);
+
+    // Map package strings to AppItem
+    final appMap = {for (final a in state.apps) a.pkg: a};
+
+    // If searching, filter across all apps
+    final isSearching = q.isNotEmpty;
+    final searchFiltered = state.apps.where((a) {
+      return a.name.toLowerCase().contains(q) || a.pkg.toLowerCase().contains(q);
     }).toList();
 
     return Container(
-      color: state.amoledMode ? Colors.black : const Color(0xF2101014),
+      color: state.amoledMode ? Colors.black : const Color(0xFF121216),
       child: SafeArea(
         child: Column(
           children: [
@@ -964,47 +1061,120 @@ class _LauncherShellState extends State<LauncherShell>
                   ? const Center(child: CircularProgressIndicator())
                   : NotificationListener<ScrollNotification>(
                       onNotification: (n) {
-                        // Smooth pull-down to return home from top of app list
                         if (n is OverscrollNotification &&
-                            n.overscroll < -12 &&
+                            n.overscroll < -8 &&
                             _gridScrollCtrl.offset <= 0) {
                           _closeDrawer();
                           return true;
                         }
                         return false;
                       },
-                      child: GridView.builder(
+                      child: ListView(
                         controller: _gridScrollCtrl,
                         physics: const BouncingScrollPhysics(
                             parent: AlwaysScrollableScrollPhysics()),
-                        cacheExtent: 2500,
-                        addRepaintBoundaries: true,
-                        addAutomaticKeepAlives: true,
                         padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: state.gridCols,
-                          mainAxisSpacing: 18,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 0.78,
-                        ),
-                        itemCount: filtered.length,
-                        itemBuilder: (ctx, i) {
-                          final app = filtered[i];
-                          return AppIconTile(
-                            key: ValueKey(app.pkg),
-                            app: app,
-                            shape: state.iconShape,
-                            showLabel: state.showLabels,
-                            size: 56,
-                            onTap: () => state.launch(app.pkg),
-                            onLongPress: () => _showAppMenu(app),
-                          );
-                        },
+                        children: [
+                          if (isSearching) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Text('Search Results (${searchFiltered.length})',
+                                  style: TextStyle(color: cs.primary, fontWeight: FontWeight.bold, fontSize: 15)),
+                            ),
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: state.gridCols,
+                                mainAxisSpacing: 18,
+                                crossAxisSpacing: 12,
+                                childAspectRatio: 0.78,
+                              ),
+                              itemCount: searchFiltered.length,
+                              itemBuilder: (ctx, i) {
+                                final app = searchFiltered[i];
+                                return AppIconTile(
+                                  key: ValueKey(app.pkg),
+                                  app: app,
+                                  shape: state.iconShape,
+                                  showLabel: state.showLabels,
+                                  size: 56,
+                                  onTap: () => state.launch(app.pkg),
+                                  onLongPress: () => _showAppMenu(app),
+                                );
+                              },
+                            ),
+                          ] else ...[
+                            // Axion OS Category Boxes
+                            for (final entry in state.categories.entries)
+                              if (entry.value.isNotEmpty) ...[
+                                Container(
+                                  margin: const EdgeInsets.only(bottom: 20),
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1A1A20),
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(Icons.folder_rounded, color: cs.primary, size: 20),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            entry.key,
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const Spacer(),
+                                          Text(
+                                            '${entry.value.length}',
+                                            style: TextStyle(color: Colors.white54, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      GridView.builder(
+                                        shrinkWrap: true,
+                                        physics: const NeverScrollableScrollPhysics(),
+                                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                          crossAxisCount: state.gridCols,
+                                          mainAxisSpacing: 14,
+                                          crossAxisSpacing: 10,
+                                          childAspectRatio: 0.78,
+                                        ),
+                                        itemCount: entry.value.length,
+                                        itemBuilder: (ctx, idx) {
+                                          final pkg = entry.value[idx];
+                                          final app = appMap[pkg];
+                                          if (app == null) return const SizedBox.shrink();
+                                          return AppIconTile(
+                                            key: ValueKey(app.pkg),
+                                            app: app,
+                                            shape: state.iconShape,
+                                            showLabel: state.showLabels,
+                                            size: 52,
+                                            onTap: () => state.launch(app.pkg),
+                                            onLongPress: () => _showAppMenu(app),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                          ],
+                        ],
                       ),
                     ),
             ),
 
-            if (_query.trim().isNotEmpty && filtered.isEmpty)
+            if (isSearching && searchFiltered.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: FilledButton.icon(
@@ -1014,7 +1184,7 @@ class _LauncherShellState extends State<LauncherShell>
                 ),
               ),
 
-            // Material You Bottom Drawer Bar (Search + Close Arrow)
+            // Bottom Drawer Bar
             GestureDetector(
               onVerticalDragUpdate: (d) =>
                   _onVerticalDragUpdate(d, screenHeight),
@@ -1022,11 +1192,10 @@ class _LauncherShellState extends State<LauncherShell>
               behavior: HitTestBehavior.opaque,
               child: Container(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHigh.withValues(alpha: 0.65),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1E1E24),
                   border: Border(
-                      top: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.1))),
+                      top: BorderSide(color: Colors.white10)),
                 ),
                 child: Row(
                   children: [
@@ -1044,7 +1213,7 @@ class _LauncherShellState extends State<LauncherShell>
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
                           hintText:
-                              'Search ${state.apps.length} installed apps...',
+                              'Search ${state.apps.length} apps in categories...',
                           hintStyle: const TextStyle(color: Colors.white54),
                           prefixIcon:
                               Icon(Icons.search_rounded, color: cs.primary),
@@ -1059,7 +1228,7 @@ class _LauncherShellState extends State<LauncherShell>
                                 )
                               : null,
                           filled: true,
-                          fillColor: const Color(0xFF1E1E24),
+                          fillColor: const Color(0xFF16161C),
                           contentPadding: EdgeInsets.zero,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(28),
@@ -1067,8 +1236,8 @@ class _LauncherShellState extends State<LauncherShell>
                           ),
                         ),
                         onSubmitted: (v) {
-                          if (filtered.isNotEmpty) {
-                            state.launch(filtered.first.pkg);
+                          if (searchFiltered.isNotEmpty) {
+                            state.launch(searchFiltered.first.pkg);
                           } else if (v.trim().isNotEmpty) {
                             state.searchWeb(v);
                           }
@@ -1098,37 +1267,22 @@ class _LauncherShellState extends State<LauncherShell>
       child: Scaffold(
         backgroundColor: state.amoledMode ? Colors.black : Colors.transparent,
         resizeToAvoidBottomInset: false,
-        body: AnimatedBuilder(
-          animation: _drawerCtrl,
-          builder: (context, _) {
-            final v = _drawerCtrl.value;
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                IgnorePointer(
-                  ignoring: v > 0.1,
-                  child: Opacity(
-                    opacity: (1.0 - v * 1.25).clamp(0.0, 1.0),
-                    child: Transform.scale(
-                      scale: 1.0 - (v * 0.05),
-                      child: RepaintBoundary(
-                        child: _buildHomePage(context, h),
-                      ),
-                    ),
-                  ),
-                ),
-                IgnorePointer(
-                  ignoring: v < 0.05,
-                  child: FractionalTranslation(
-                    translation: Offset(0, 1.0 - v),
-                    child: RepaintBoundary(
-                      child: _buildAppDrawer(context, h),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            FadeTransition(
+              opacity: _homeOpacity,
+              child: RepaintBoundary(
+                child: _buildHomePage(context, h),
+              ),
+            ),
+            SlideTransition(
+              position: _drawerOffset,
+              child: RepaintBoundary(
+                child: _buildAppDrawer(context, h),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1176,7 +1330,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Pixel Launcher MD3',
+                              'Pixel Launcher Axion Categories',
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w800,
@@ -1184,7 +1338,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              'Made by Alex Desrosier • Custom AOSP Build',
+                              'Custom AOSP Build • 120Hz Fast Engine',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: cs.onPrimaryContainer
@@ -1362,15 +1516,6 @@ class LauncherSettingsSheet extends StatelessWidget {
                       style: TextStyle(color: Colors.white60)),
                 ),
                 SwitchListTile.adaptive(
-                  value: state.glassEffect,
-                  onChanged: state.setGlass,
-                  title: const Text('Liquid Glass Blur Dock',
-                      style: TextStyle(color: Colors.white)),
-                  subtitle: const Text(
-                      'Frosted translucent dock and search bar',
-                      style: TextStyle(color: Colors.white60)),
-                ),
-                SwitchListTile.adaptive(
                   value: state.showLabels,
                   onChanged: state.setShowLabels,
                   title: const Text('Show App Icon Labels',
@@ -1399,7 +1544,7 @@ class LauncherSettingsSheet extends StatelessWidget {
                           label: Text(seedOptions[i].name),
                           backgroundColor: state.seedIndex == i
                               ? cs.primaryContainer
-                              : const Color(0xFF1E1E24),
+                              : const Color(0xFF1E1E22),
                         ),
                       ),
                   ],
