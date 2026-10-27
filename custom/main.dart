@@ -95,7 +95,7 @@ class LauncherState extends ChangeNotifier {
 
   List<AppItem> apps = [];
   List<String> dockPkgs = [];
-  Map<int, String> homeSlots = {}; // slotIndex -> packageName
+  Map<int, String> homeSlots = {};
   bool loading = true;
 
   bool amoledMode = false;
@@ -156,7 +156,6 @@ class LauncherState extends ChangeNotifier {
         }
         apps = loaded;
 
-        // Populate dock defaults
         if (dockPkgs.isEmpty && apps.isNotEmpty) {
           final defaults = <String>[];
           for (final a in apps) {
@@ -184,7 +183,6 @@ class LauncherState extends ChangeNotifier {
           _prefs?.setStringList('dock', dockPkgs);
         }
 
-        // Populate initial home grid slots if empty
         if (homeSlots.isEmpty && apps.isNotEmpty) {
           int slot = 0;
           for (final a in apps) {
@@ -615,7 +613,7 @@ class _LauncherShellState extends State<LauncherShell>
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.shapes_rounded,
+                  leading: const Icon(Icons.category_rounded,
                       color: Colors.white70),
                   title: const Text('Change App Icon Shape',
                       style: TextStyle(color: Colors.white)),
@@ -787,7 +785,6 @@ class _LauncherShellState extends State<LauncherShell>
               ),
               const Spacer(),
 
-              // Drag & Drop Home Screen Grid
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -1027,7 +1024,6 @@ class _LauncherShellState extends State<LauncherShell>
                   ? const Center(child: CircularProgressIndicator())
                   : NotificationListener<ScrollNotification>(
                       onNotification: (n) {
-                        // Smooth pull-down to return home from top of app list
                         if (n is OverscrollNotification &&
                             n.overscroll < -12 &&
                             _gridScrollCtrl.offset <= 0) {
@@ -1186,7 +1182,6 @@ class LauncherSettingsSheet extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
 
-                // Grid Dimensions Selector
                 const Text(
                   'Home Screen Grid Size',
                   style: TextStyle(
