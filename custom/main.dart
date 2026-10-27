@@ -970,24 +970,18 @@ class _LauncherHomeState extends State<LauncherHome>
       onLongPress: _showLauncherSettings,
       onVerticalDragUpdate: (details) {
         final screenHeight = MediaQuery.of(context).size.height;
-        if (details.localPosition.dy > screenHeight * 0.85 ||
-            details.localPosition.dy < screenHeight * 0.12) {
+        // Completely disable drawer drag initiation on the home screen background
+        // so that Android's swipe-up for Recents and swipe-down for Notifications never conflict.
+        if (details.localPosition.dy > screenHeight * 0.75 ||
+            details.localPosition.dy < screenHeight * 0.15) {
           return;
         }
-
-        _drawerController.value -= details.primaryDelta! / (screenHeight * 0.75);
       },
       onVerticalDragEnd: (details) {
         final velocity = details.primaryVelocity ?? 0;
         if (velocity > 600 && _drawerController.value < 0.1) {
           _channel.invokeMethod('expandNotifications');
           return;
-        }
-
-        if (velocity < -650 || _drawerController.value > 0.45) {
-          _openDrawer();
-        } else {
-          _closeDrawer();
         }
       },
       child: SafeArea(
@@ -1326,6 +1320,26 @@ class _LauncherHomeState extends State<LauncherHome>
                               );
                             },
                           ),
+              ),
+
+              // Dedicated Back/Home Arrow Bar at the Bottom of App Drawer
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerLow.withOpacity(0.7),
+                  border: Border(
+                    top: BorderSide(
+                      color: cs.outlineVariant.withOpacity(0.2),
+                    ),
+                  ),
+                ),
+                child: Center(
+                  child: IconButton.filledTonal(
+                    onPressed: _closeDrawer,
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
+                    tooltip: 'Return to Home Screen',
+                  ),
+                ),
               ),
             ],
           ),
