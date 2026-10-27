@@ -1,10 +1,3 @@
-Here is the updated **`custom/main.dart`** file with all the "NEW" badges and the "New & Recent" category folder completely removed. Your Axion OS Smart Categories layout and real-time app drawer remain lightning-fast and fully intact.
-
-### Updated `custom/main.dart`
-
-Replace your `custom/main.dart` with this code:
-
-```dart
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
