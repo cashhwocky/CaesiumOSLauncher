@@ -29,9 +29,9 @@ jobs:
 
           cat > build_app/pubspec.yaml << 'EOF'
           name: caesium_launcher
-          description: Custom iOS-Style Caesium Launcher by Alex Desrosier.
+          description: Custom Material You Caesium Launcher by Alex Desrosier.
           publish_to: 'none'
-          version: 1.7.0+7
+          version: 2.0.0+8
 
           environment:
             sdk: '>=3.4.0 <4.0.0'
@@ -69,7 +69,7 @@ jobs:
                       android:stateNotNeeded="true"
                       android:clearTaskOnLaunch="true"
                       android:excludeFromRecents="true"
-                      android:windowSoftInputMode="adjustPan"
+                      android:windowSoftInputMode="adjustResize"
                       android:screenOrientation="portrait"
                       android:theme="@style/LaunchTheme"
                       android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode">
@@ -149,6 +149,7 @@ jobs:
           class MainActivity: FlutterActivity() {
               private val CHANNEL = "caesiumlauncher/native"
               private val executor = Executors.newSingleThreadExecutor()
+              private var cachedApps: ArrayList<Map<String, Any>>? = null
 
               override fun getTransparencyMode(): TransparencyMode = TransparencyMode.transparent
 
@@ -195,7 +196,7 @@ jobs:
                                   val pm = packageManager
                                   val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
                                   val resolveInfos = pm.queryIntentActivities(intent, 0)
-                                  val apps = ArrayList<Map<String, Any>>()
+                                  val apps = ArrayList<Map<String, Any>>(resolveInfos.size)
                                   val myPkg = packageName
                                   for (ri in resolveInfos) {
                                       val pkg = ri.activityInfo.packageName
@@ -206,6 +207,7 @@ jobs:
                                       apps.add(mapOf("name" to label, "pkg" to pkg, "icon" to iconBytes))
                                   }
                                   apps.sortBy { (it["name"] as String).lowercase() }
+                                  cachedApps = apps
                                   runOnUiThread { result.success(apps) }
                               }
                           }
@@ -256,28 +258,20 @@ jobs:
                               } catch (_: Exception) {}
                               result.success(true)
                           }
-                          "openUrl" -> {
-                              val url = call.argument<String>("url")
-                              if (url != null) {
-                                  try {
-                                      startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
-                                  } catch (_: Exception) {}
-                              }
-                              result.success(true)
-                          }
                           else -> result.notImplemented()
                       }
                   }
               }
 
               private fun drawableToBytes(drawable: Drawable): ByteArray {
-                  val size = 144
+                  val size = 128
                   val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
                   val canvas = Canvas(bmp)
                   drawable.setBounds(0, 0, size, size)
                   drawable.draw(canvas)
-                  val stream = ByteArrayOutputStream()
-                  bmp.compress(Bitmap.CompressFormat.PNG, 90, stream)
+                  val stream = ByteArrayOutputStream(4096)
+                  bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                  bmp.recycle()
                   return stream.toByteArray()
               }
           }
