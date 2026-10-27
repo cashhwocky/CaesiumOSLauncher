@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,13 +22,23 @@ class AppModel {
   final Uint8List iconBytes;
   final MemoryImage imageProvider;
   final String category;
+  final int installTime;
 
   AppModel({
     required this.name,
     required this.pkg,
     required this.iconBytes,
     required this.category,
+    required this.installTime,
   }) : imageProvider = MemoryImage(iconBytes);
+
+  // Installed within the last 48 hours
+  bool get isNew {
+    if (installTime <= 0) return false;
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    const fortyEightHoursMs = 48 * 60 * 60 * 1000;
+    return (nowMs - installTime) < fortyEightHoursMs;
+  }
 
   static String categorize(String name, String pkg) {
     final lowerPkg = pkg.toLowerCase();
@@ -128,14 +137,17 @@ class _LauncherHomeState extends State<LauncherHome>
 
   List<AppModel> _allApps = [];
   List<AppModel> _filteredApps = [];
+  List<AppModel> _recentApps = [];
   List<String> _dockPackages = [];
   List<String> _homeGridPackages = [];
+  Set<String> _dismissedNewApps = {};
 
   bool _isLoading = true;
   bool _categorizedMode = false;
   bool _themedIcons = false;
+  bool _showRecentShelf = true;
   int _gridColumns = 4;
-  String _iconShape = 'circle'; // circle, squircle, rounded, teardrop
+  String _iconShape = 'circle';
 
   late AnimationController _drawerController;
   final TextEditingController _searchController = TextEditingController();
@@ -155,6 +167,47 @@ class _LauncherHomeState extends State<LauncherHome>
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
+
+    // Listen for live app installs or uninstalls from Kotlin BroadcastReceiver
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onPackagesChanged') {
+        final String? action = call.arguments?['action'];
+        final String? pkg = call.arguments?['pkg'];
+        await _fetchApps();
+        if (mounted && action == 'ADDED' && pkg != null) {
+          final addedApp = _allApps.where((a) => a.pkg == pkg).firstOrNull;
+          if (addedApp != null) {
+            // Automatically pin new app to home screen if there's space (< 16 apps)
+            if (!_homeGridPackages.contains(pkg) &&
+                _homeGridPackages.length < 16) {
+              setState(() => _homeGridPackages.add(pkg));
+              _savePreferences();
+            }
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                content: Row(
+                  children: [
+                    const Icon(Icons.download_done_rounded,
+                        color: Colors.white),
+                    const SizedBox(width: 10),
+                    Expanded(
+                        child: Text('New app installed: ${addedApp.name}')),
+                  ],
+                ),
+                action: SnackBarAction(
+                  label: 'OPEN',
+                  onPressed: () => _launchApp(addedApp.pkg),
+                ),
+              ),
+            );
+          }
+        }
+      }
+    });
+
     _loadPreferences();
     _fetchApps();
   }
@@ -174,8 +227,11 @@ class _LauncherHomeState extends State<LauncherHome>
     setState(() {
       _dockPackages = prefs.getStringList('dock_pkgs') ?? [];
       _homeGridPackages = prefs.getStringList('home_grid_pkgs') ?? [];
+      _dismissedNewApps =
+          (prefs.getStringList('dismissed_new_pkgs') ?? []).toSet();
       _categorizedMode = prefs.getBool('categorized_mode') ?? false;
       _themedIcons = prefs.getBool('themed_icons') ?? false;
+      _showRecentShelf = prefs.getBool('show_recent_shelf') ?? true;
       _gridColumns = prefs.getInt('grid_columns') ?? 4;
       _iconShape = prefs.getString('icon_shape') ?? 'circle';
     });
@@ -185,8 +241,11 @@ class _LauncherHomeState extends State<LauncherHome>
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('dock_pkgs', _dockPackages);
     await prefs.setStringList('home_grid_pkgs', _homeGridPackages);
+    await prefs.setStringList(
+        'dismissed_new_pkgs', _dismissedNewApps.toList());
     await prefs.setBool('categorized_mode', _categorizedMode);
     await prefs.setBool('themed_icons', _themedIcons);
+    await prefs.setBool('show_recent_shelf', _showRecentShelf);
     await prefs.setInt('grid_columns', _gridColumns);
     await prefs.setString('icon_shape', _iconShape);
   }
@@ -200,6 +259,7 @@ class _LauncherHomeState extends State<LauncherHome>
           final map = Map<String, dynamic>.from(item);
           final String name = map['name'] ?? 'App';
           final String pkg = map['pkg'] ?? '';
+          final int installTime = (map['installTime'] as num?)?.toInt() ?? 0;
           final Uint8List icon = map['icon'] is Uint8List
               ? map['icon']
               : Uint8List.fromList(List<int>.from(map['icon']));
@@ -209,19 +269,26 @@ class _LauncherHomeState extends State<LauncherHome>
             pkg: pkg,
             iconBytes: icon,
             category: AppModel.categorize(name, pkg),
+            installTime: installTime,
           );
           parsed.add(model);
         }
 
         if (mounted) {
-          // Pre-cache all icons into GPU memory immediately to eliminate scroll stutter
           for (final app in parsed) {
             precacheImage(app.imageProvider, context);
           }
 
+          // Compute Recently Installed Apps (sorted newest first, max 8)
+          final recent = parsed
+              .where((a) => a.isNew && !_dismissedNewApps.contains(a.pkg))
+              .toList()
+            ..sort((a, b) => b.installTime.compareTo(a.installTime));
+
           setState(() {
             _allApps = parsed;
             _filteredApps = parsed;
+            _recentApps = recent.take(8).toList();
             _isLoading = false;
 
             if (_dockPackages.isEmpty && parsed.isNotEmpty) {
@@ -272,6 +339,7 @@ class _LauncherHomeState extends State<LauncherHome>
 
   Future<void> _launchApp(String pkg) async {
     HapticFeedback.selectionClick();
+    // Launching a new app clears its "NEW" badge after first launch if desired
     await _channel.invokeMethod('launchApp', {'pkg': pkg});
   }
 
@@ -300,6 +368,9 @@ class _LauncherHomeState extends State<LauncherHome>
   Widget _buildAppIcon(AppModel app,
       {double size = 58, bool showLabel = true, Color? textColor}) {
     final cs = Theme.of(context).colorScheme;
+    final bool showNewBadge =
+        app.isNew && !_dismissedNewApps.contains(app.pkg);
+
     return GestureDetector(
       onTap: () => _launchApp(app.pkg),
       onLongPress: () => _showAppOptionsSheet(app),
@@ -308,37 +379,73 @@ class _LauncherHomeState extends State<LauncherHome>
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            width: size,
-            height: size,
-            decoration: ShapeDecoration(
-              shape: _getShapeBorder(),
-              color: _themedIcons
-                  ? cs.secondaryContainer
-                  : cs.surfaceContainerHighest.withOpacity(0.35),
-              shadows: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.14),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: ColorFiltered(
-              colorFilter: _themedIcons
-                  ? ColorFilter.mode(cs.onSecondaryContainer, BlendMode.modulate)
-                  : const ColorFilter.mode(
-                      Colors.transparent, BlendMode.dst),
-              child: Image(
-                image: app.imageProvider,
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
                 width: size,
                 height: size,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                filterQuality: FilterQuality.medium,
+                decoration: ShapeDecoration(
+                  shape: _getShapeBorder(),
+                  color: _themedIcons
+                      ? cs.secondaryContainer
+                      : cs.surfaceContainerHighest.withOpacity(0.35),
+                  shadows: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.14),
+                      blurRadius: 6,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: ColorFiltered(
+                  colorFilter: _themedIcons
+                      ? ColorFilter.mode(
+                          cs.onSecondaryContainer, BlendMode.modulate)
+                      : const ColorFilter.mode(
+                          Colors.transparent, BlendMode.dst),
+                  child: Image(
+                    image: app.imageProvider,
+                    width: size,
+                    height: size,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    filterQuality: FilterQuality.medium,
+                  ),
+                ),
               ),
-            ),
+              if (showNewBadge)
+                Positioned(
+                  top: -4,
+                  right: -6,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: cs.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: cs.surface, width: 1.5),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 4,
+                          offset: Offset(0, 1),
+                        )
+                      ],
+                    ),
+                    child: Text(
+                      'NEW',
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.4,
+                        color: cs.onTertiaryContainer,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
           if (showLabel) ...[
             const SizedBox(height: 6),
@@ -376,6 +483,7 @@ class _LauncherHomeState extends State<LauncherHome>
     final cs = Theme.of(context).colorScheme;
     final isPinnedHome = _homeGridPackages.contains(app.pkg);
     final isPinnedDock = _dockPackages.contains(app.pkg);
+    final hasNewBadge = app.isNew && !_dismissedNewApps.contains(app.pkg);
 
     showModalBottomSheet(
       context: context,
@@ -429,6 +537,20 @@ class _LauncherHomeState extends State<LauncherHome>
                 ),
                 const SizedBox(height: 16),
                 const Divider(),
+                if (hasNewBadge)
+                  ListTile(
+                    leading: Icon(Icons.auto_awesome_outlined,
+                        color: cs.tertiary),
+                    title: const Text('Dismiss "NEW" Badge'),
+                    onTap: () {
+                      setState(() {
+                        _dismissedNewApps.add(app.pkg);
+                        _recentApps.removeWhere((a) => a.pkg == app.pkg);
+                      });
+                      _savePreferences();
+                      Navigator.pop(ctx);
+                    },
+                  ),
                 ListTile(
                   leading: Icon(
                     isPinnedHome
@@ -436,8 +558,9 @@ class _LauncherHomeState extends State<LauncherHome>
                         : Icons.add_to_home_screen_rounded,
                     color: cs.primary,
                   ),
-                  title: Text(
-                      isPinnedHome ? 'Remove from Home Screen' : 'Add to Home Screen'),
+                  title: Text(isPinnedHome
+                      ? 'Remove from Home Screen'
+                      : 'Add to Home Screen'),
                   onTap: () {
                     setState(() {
                       if (isPinnedHome) {
@@ -455,7 +578,8 @@ class _LauncherHomeState extends State<LauncherHome>
                     isPinnedDock ? Icons.dock_outlined : Icons.dock_rounded,
                     color: cs.primary,
                   ),
-                  title: Text(isPinnedDock ? 'Remove from Dock' : 'Pin to Dock (Max 5)'),
+                  title: Text(
+                      isPinnedDock ? 'Remove from Dock' : 'Pin to Dock (Max 5)'),
                   onTap: () {
                     setState(() {
                       if (isPinnedDock) {
@@ -562,11 +686,24 @@ class _LauncherHomeState extends State<LauncherHome>
                           ),
                       ],
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Show Recently Installed'),
+                      subtitle: const Text(
+                          'Highlight newly downloaded apps (last 48h)'),
+                      value: _showRecentShelf,
+                      onChanged: (val) {
+                        setState(() => _showRecentShelf = val);
+                        setSheetState(() {});
+                        _savePreferences();
+                      },
+                    ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Material You Themed Icons'),
-                      subtitle: const Text('Tint icons with dynamic wallpaper colors'),
+                      subtitle:
+                          const Text('Tint icons with dynamic wallpaper colors'),
                       value: _themedIcons,
                       onChanged: (val) {
                         setState(() => _themedIcons = val);
@@ -714,7 +851,9 @@ class _LauncherHomeState extends State<LauncherHome>
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Caesium Material You',
+                        _recentApps.isNotEmpty
+                            ? '${_recentApps.length} newly installed'
+                            : 'Caesium Material You',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
@@ -777,7 +916,7 @@ class _LauncherHomeState extends State<LauncherHome>
                 ),
               ),
 
-              // Bottom Search Pill (Pixel Launcher Style)
+              // Bottom Search Pill
               GestureDetector(
                 onTap: () {
                   _openDrawer();
@@ -846,7 +985,6 @@ class _LauncherHomeState extends State<LauncherHome>
                       RepaintBoundary(
                         child: _buildAppIcon(app, size: 54, showLabel: false),
                       ),
-                    // All Apps Drawer Button
                     GestureDetector(
                       onTap: _openDrawer,
                       child: Container(
@@ -873,6 +1011,91 @@ class _LauncherHomeState extends State<LauncherHome>
     );
   }
 
+  Widget _buildRecentlyInstalledShelf(ColorScheme cs) {
+    if (!_showRecentShelf ||
+        _recentApps.isEmpty ||
+        _searchController.text.isNotEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      decoration: BoxDecoration(
+        color: cs.secondaryContainer.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: cs.primary.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.auto_awesome_rounded,
+                      size: 16, color: cs.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Recently Installed',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: cs.primary,
+                    ),
+                  ),
+                ],
+              ),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    for (final a in _recentApps) {
+                      _dismissedNewApps.add(a.pkg);
+                    }
+                    _recentApps.clear();
+                  });
+                  _savePreferences();
+                },
+                child: Text(
+                  'Clear',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 82,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              itemCount: _recentApps.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              itemBuilder: (context, idx) {
+                final app = _recentApps[idx];
+                return SizedBox(
+                  width: 68,
+                  child: RepaintBoundary(
+                    child: _buildAppIcon(
+                      app,
+                      size: 52,
+                      textColor: cs.onSurface,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDrawerSheet(ColorScheme cs) {
     return Container(
       decoration: BoxDecoration(
@@ -890,7 +1113,7 @@ class _LauncherHomeState extends State<LauncherHome>
         bottom: true,
         child: Column(
           children: [
-            // Drag Handle & Header
+            // Drag Handle
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onVerticalDragUpdate: (details) {
@@ -921,7 +1144,7 @@ class _LauncherHomeState extends State<LauncherHome>
               ),
             ),
 
-            // Category / All Apps Toggle Bar
+            // Header & Mode Switch
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               child: Row(
@@ -953,7 +1176,10 @@ class _LauncherHomeState extends State<LauncherHome>
               ),
             ),
 
-            // Ultra-Fast Pre-Cached App List / Grid
+            // Recently Installed Shelf
+            _buildRecentlyInstalledShelf(cs),
+
+            // Main App List / Grid
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
@@ -961,11 +1187,11 @@ class _LauncherHomeState extends State<LauncherHome>
                       ? _buildCategorizedDrawer(cs)
                       : GridView.builder(
                           controller: _drawerScrollController,
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
                           physics: const BouncingScrollPhysics(
                             parent: AlwaysScrollableScrollPhysics(),
                           ),
-                          cacheExtent: 1500, // Keeps off-screen apps rendered for 120Hz scrolling
+                          cacheExtent: 1500,
                           itemCount: _filteredApps.length,
                           gridDelegate:
                               SliverGridDelegateWithFixedCrossAxisCount(
@@ -987,7 +1213,7 @@ class _LauncherHomeState extends State<LauncherHome>
                         ),
             ),
 
-            // Bottom Ergonomic Search Bar + Close Button
+            // Bottom Search Bar
             Container(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
               decoration: BoxDecoration(
@@ -1137,12 +1363,9 @@ class _LauncherHomeState extends State<LauncherHome>
         resizeToAvoidBottomInset: true,
         body: Stack(
           children: [
-            // Home Screen Layer
             RepaintBoundary(
               child: _buildHomeScreen(cs),
             ),
-
-            // Hardware-Accelerated App Drawer Layer
             AnimatedBuilder(
               animation: _drawerController,
               builder: (context, child) {
@@ -1151,14 +1374,12 @@ class _LauncherHomeState extends State<LauncherHome>
 
                 return Stack(
                   children: [
-                    // Scrim Overlay
                     GestureDetector(
                       onTap: _closeDrawer,
                       child: Container(
                         color: Colors.black.withOpacity(0.45 * val),
                       ),
                     ),
-                    // Sliding Sheet
                     FractionalTranslation(
                       translation: Offset(0, 1.0 - val),
                       child: child,
